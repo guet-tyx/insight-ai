@@ -1,41 +1,18 @@
 """认证路由：注册 / 登录（OAuth2 密码流）/ 当前用户。"""
 from __future__ import annotations
 
-import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import create_access_token, decode_access_token, hash_password, verify_password
+from app.core.deps import get_current_user
+from app.core.security import create_access_token, hash_password, verify_password
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.user import RegisterRequest, TokenResponse, UserOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-# tokenUrl 指向登录接口，/docs 的 Authorize 按钮自动填入 token
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
-
-
-def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
-) -> User:
-    """依赖：解析 Bearer Token 并加载当前用户；无效则 401。"""
-    credentials_exc = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="无效或过期的认证凭据",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        subject = decode_access_token(token)
-    except pyjwt.PyJWTError:
-        raise credentials_exc
-    user = db.get(User, int(subject))
-    if user is None:
-        raise credentials_exc
-    return user
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)

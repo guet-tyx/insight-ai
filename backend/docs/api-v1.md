@@ -15,9 +15,10 @@
 | POST | `/auth/register` | ✅ W1 | 注册：`{username, password}` → 201 用户信息；409 重名；422 校验失败 |
 | POST | `/auth/login` | ✅ W1 | OAuth2 密码流（表单）→ `{access_token, token_type, user}`；401 凭证错误 |
 | GET | `/auth/me` | ✅ W1 | 当前用户信息（Bearer）；401 未认证/过期 |
-| GET | `/knowledge/documents` | 🚧 W2 | 文档库列表 |
-| POST | `/knowledge/documents/upload` | 🚧 W2 | PDF 上传 → PyMuPDF 解析 → Milvus 向量化 |
-| POST | `/knowledge/query` | 🚧 W2 | 向量检索问答（GraphRAG 基础版） |
+| GET | `/knowledge/documents` | ✅ W2 | 文档库列表（含处理状态） |
+| POST | `/knowledge/documents/upload` | ✅ W2 | PDF 上传 → **202** 后台解析+向量化（轮询状态），仅支持 .pdf，≤20MB |
+| GET | `/knowledge/documents/{id}` | ✅ W2 | 单文档状态（processing → ready / failed 轮询用） |
+| POST | `/knowledge/query` | ✅ W2 | 向量检索 Top-K + LLM 引证式回答（sense-nova deepseek-v4-flash） |
 | POST | `/chat/sessions` | 🚧 W4 | 创建对话会话 |
 | POST | `/chat/sessions/{id}/messages` | 🚧 W4 | 发消息，SSE 流式返回 |
 | POST | `/agents/runs` | 🚧 W5 | 启动多智能体复合分析任务 |

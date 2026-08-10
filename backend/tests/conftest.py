@@ -42,3 +42,51 @@ def auth_headers(client: TestClient) -> dict[str, str]:
     )
     token = resp.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture()
+def sample_pdf_bytes() -> bytes:
+    """现场生成含 H1/H2 标题树的中文测试 PDF（china-s 内置中文字体）。"""
+    import pymupdf
+
+    doc = pymupdf.open()
+    page = doc.new_page()
+    lines = [
+        ("Insight AI 用户手册", 22),      # H1
+        ("第一章 系统架构", 16),           # H2
+        ("本系统基于 LangGraph 多智能体架构，包含 Supervisor 与多个专家子图。", 11),
+        ("Supervisor Agent 负责任务拆解与路由分发。", 11),
+        ("第二章 知识库 Pipeline", 16),    # H2
+        ("文档经过版面感知解析后向量化写入 Milvus 数据库。", 11),
+        ("嵌入模型采用 BAAI/bge-m3，维度为 1024。", 11),
+        ("第三章 检索问答", 16),           # H2
+        ("使用余弦相似度进行 Top-K 召回，由大模型生成引证式回答。", 11),
+    ]
+    y = 60
+    for text, size in lines:
+        page.insert_text((60, y), text, fontsize=size, fontname="china-s")
+        y += size + 14
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+# ---- 基础设施探测：Milvus / 嵌入 Key / LLM Key 齐备才跑集成测试 ----
+def _milvus_up() -> bool:
+    try:
+        from app.services.ingest_service import get_milvus_client
+
+        get_milvus_client().list_collections()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+from app.core.config import settings  # noqa: E402
+
+MILVUS_UP = _milvus_up()
+HAS_EMBED_KEY = bool(settings.siliconflow_api_key)
+HAS_LLM_KEY = bool(settings.openai_api_key)
+INFRA_READY = MILVUS_UP and HAS_EMBED_KEY and HAS_LLM_KEY
+
+# 供测试模块使用：pytestmark = pytest.mark.skipif(not INFRA_READY, ...)

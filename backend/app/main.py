@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -13,12 +14,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.db.session import Base, engine
+from app.models.document import Document  # noqa: F401 — 注册表模型（建表用）
+from app.models.user import User  # noqa: F401 — 建表用
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """启动时建表（SQLite 零迁移 MVP；后续周次引入 Alembic）。"""
+    """启动就绪：建表 + 幂等创建 Milvus 集合（失败仅告警，不影响 API 启动）。"""
     Base.metadata.create_all(bind=engine)
+    try:
+        from app.services.ingest_service import ensure_collection
+
+        ensure_collection()
+    except Exception:  # noqa: BLE001 — 基础设施未就绪时应用仍可启动
+        logger.warning("Milvus 集合初始化失败（容器未启动？），知识库接口将不可用", exc_info=True)
     yield
 
 
