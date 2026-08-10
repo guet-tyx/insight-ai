@@ -21,6 +21,9 @@
 | POST | `/knowledge/query` | ✅ W2 | 向量检索 Top-K + LLM 引证式回答（sense-nova deepseek-v4-flash） |
 | POST | `/collect` | ✅ W3 | 自然语言采集：`{url, instruction, output_schema?, max_steps?}` → **202** + task_id，后台浏览器 Agent 执行 |
 | GET | `/collect/tasks/{id}` | ✅ W3 | 采集任务轮询（running → ready（含 data）/ failed（含 error）） |
+| POST | `/chat/sessions` | ✅ W4 | 创建会话 → `{session_id}`（多轮上下文 thread_id） |
+| GET | `/chat/sessions/{id}/messages` | ✅ W4 | 会话最近 20 条 user/assistant 历史（未知会话 404） |
+| POST | `/chat/sessions/{id}/messages` | ✅ W4 | 发消息 → **SSE 流式** Agent 执行事件（见下方协议） |
 | POST | `/chat/sessions` | 🚧 W4 | 创建对话会话 |
 | POST | `/chat/sessions/{id}/messages` | 🚧 W4 | 发消息，SSE 流式返回 |
 | POST | `/agents/runs` | 🚧 W5 | 启动多智能体复合分析任务 |
@@ -45,6 +48,23 @@
 - JWT：HS256，`sub`=用户 ID，含 `iat`/`exp`；`JWT_SECRET` 来自 `.env`
 - 数据模型：SQLAlchemy 2.0 声明式 + SQLite（MVP）→ W1 后可按需切 Postgres（仅改 `DATABASE_URL`）
 - 用户模型字段：`id / username(3-32位字母数字下划线) / hashed_password / created_at`
+
+## SSE 流式事件协议（W4 聊天）
+
+`POST /api/v1/chat/sessions/{id}/messages` 返回 `text/event-stream`，每帧：
+
+```
+data: {"type": "tool_start", "name": "knowledge_search", "args": {...}}
+data: {"type": "tool_end", "name": "tools", "preview": "结果前 200 字"}
+data: {"type": "token", "content": "增量文本"}
+data: {"type": "done", "answer": "最终答案全文"}
+data: {"type": "error", "message": "错误摘要"}
+```
+
+- 工具执行长耗时期间每 15s 输出 `: ping` 心跳注释行（防中间层断流）
+- ⚠️ deepseek-v4-flash 推理模型的 `reasoning_content` 已被后端过滤，不会出现在 token 事件
+- ⚠️ 会话记忆依赖 LangGraph 检查点单例（MemorySaver）；当前后端为**单进程部署**，
+  多 worker 部署需切换 RedisSaver（W5）
 
 ## 前端对接要点（W4 备忘）
 

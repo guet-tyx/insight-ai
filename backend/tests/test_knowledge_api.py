@@ -47,6 +47,13 @@ def _wait_ready(client: TestClient, headers: dict[str, str], doc_id: str, timeou
 def test_upload_list_query_full_flow(
     client: TestClient, auth_headers: dict[str, str], sample_pdf_bytes: bytes
 ) -> None:
+    # 共享 Milvus 集合可能残留其它测试文档 → 先清空，保证 Top1 归属本用例（确定性）
+    from app.services.ingest_service import COLLECTION, get_milvus_client
+
+    mc = get_milvus_client()
+    if mc.has_collection(COLLECTION):
+        mc.delete(COLLECTION, filter='doc_id != ""')
+
     # 1) 上传 → 202 + doc_id
     upload = client.post(
         "/api/v1/knowledge/documents/upload",
