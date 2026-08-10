@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 
 from langchain_openai import OpenAIEmbeddings
 from pymilvus import DataType, MilvusClient
@@ -86,12 +85,12 @@ def _embed_chunks(chunks: list[ParsedChunk]) -> list[list[float]]:
 
 
 def ingest_document(doc_id: str, file_bytes: bytes, filename: str) -> None:
-    """后台入库任务：解析 → 嵌入 → 写入 Milvus → 更新注册表状态。
+    """后台入库任务：解析 → 嵌入 → 写入 Milvus → 图谱抽取建图（W7）→ 更新状态。
 
     由 FastAPI BackgroundTasks 在响应返回后调用；独立 Session，
     任何异常都会把文档标记为 failed 并记录摘要。
+    图谱抽取失败不阻断入库（记录 graph_error，文档仍 ready）。
     """
-    now = datetime.now(timezone.utc).isoformat()
     db = SessionLocal()
     try:
         record = db.get(Document, doc_id)
@@ -127,6 +126,31 @@ def ingest_document(doc_id: str, file_bytes: bytes, filename: str) -> None:
             record.status = "failed"
             record.error = f"{type(exc).__name__}: {exc}"[:500]
             logger.error("文档 %s 入库失败：%s", doc_id, exc, exc_info=True)
+            db.commit()
+            return
+
+        # W7：图谱抽取与建图（失败不阻断入库）
+        try:
+            graph_count = _build_graph(chunks, doc_id)
+            record.graph_count = graph_count
+            logger.info("文档 %s 图谱构建完成：%d 实体", doc_id, graph_count)
+        except Exception as exc:  # noqa: BLE001
+            record.graph_count = 0
+            logger.warning("文档 %s 图谱构建失败（不影响检索）：%s", doc_id, exc)
         db.commit()
     finally:
         db.close()
+
+
+def _build_graph(chunks: list[ParsedChunk], doc_id: str) -> int:
+    """逐 chunk LLM 实体抽取 → 汇总参数化写图；返回实体总数。"""
+    from app.services.entity_extraction import EntityExtraction, extract_entities
+    from app.services.graph_service import ensure_graph_schema, write_triples
+
+    ensure_graph_schema()
+    total_entities = 0
+    for chunk in chunks:
+        extraction: EntityExtraction = extract_entities(chunk.text)
+        n, _ = write_triples(doc_id, extraction)
+        total_entities += n
+    return total_entities

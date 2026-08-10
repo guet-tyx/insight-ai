@@ -113,6 +113,21 @@ def _browser_ready() -> bool:
 BROWSER_READY = _browser_ready()
 
 
+# ---- Neo4j 探测（W7 GraphRAG 集成测试）----
+def _neo4j_up() -> bool:
+    try:
+        from app.services.graph_service import get_driver
+
+        with get_driver() as d:
+            d.verify_connectivity()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+NEO4J_UP = _neo4j_up()
+
+
 @pytest.fixture()
 def local_test_page() -> str:
     """线程内启动本地测试页（http.server），返回可直接采集的 URL。

@@ -17,8 +17,8 @@
 | GET | `/auth/me` | ✅ W1 | 当前用户信息（Bearer）；401 未认证/过期 |
 | GET | `/knowledge/documents` | ✅ W2 | 文档库列表（含处理状态） |
 | POST | `/knowledge/documents/upload` | ✅ W2 | PDF 上传 → **202** 后台解析+向量化（轮询状态），仅支持 .pdf，≤20MB |
-| GET | `/knowledge/documents/{id}` | ✅ W2 | 单文档状态（processing → ready / failed 轮询用） |
-| POST | `/knowledge/query` | ✅ W2 | 向量检索 Top-K + LLM 引证式回答（sense-nova deepseek-v4-flash） |
+| GET | `/knowledge/documents/{id}` | ✅ W2 | 单文档状态（processing → ready / failed 轮询用，含 graph_count 图谱实体数） |
+| POST | `/knowledge/query` | ✅ W2+W7 | 混合检索 Top-K（Milvus 向量 + Neo4j 图谱 1-2 跳 → RRF k=60 融合）+ LLM 引证式回答；SourceHit 含 `source_type`（vector/graph） |
 | POST | `/collect` | ✅ W3+W6 | 自然语言采集：`{url, instruction, source?, output_schema?, max_steps?}` → **202** + task_id。`source`: `auto`(默认，RSS 特征自动分流)/`rss`(强制 RSS，不耗浏览器)/`web`(强制浏览器) |
 | GET | `/collect/tasks/{id}` | ✅ W3 | 采集任务轮询（running → ready（含 data）/ failed（含 error））。rss 路径 data=`RssExtract{feed_title, items[]}`；web 路径默认 `WebExtract{title, summary, key_points}` |
 | POST | `/chat/sessions` | ✅ W4 | 创建会话 → `{session_id}`（多轮上下文 thread_id） |

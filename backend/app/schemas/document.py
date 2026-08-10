@@ -19,6 +19,7 @@ class DocumentOut(BaseModel):
     filename: str
     status: str
     chunk_count: int
+    graph_count: int = 0  # W7: 图谱实体数
     error: str | None = None
     created_at: datetime
 
@@ -36,6 +37,7 @@ class SourceHit(BaseModel):
     doc_id: str
     page_number: int
     parent_header: str = ""
+    source_type: str = "vector"  # W7: vector（向量召回）/ graph（图谱路径）
 
 
 class QueryResponse(BaseModel):

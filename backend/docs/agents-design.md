@@ -81,8 +81,10 @@
 
 ## 六、已知边界（后续周次演进）
 
-- **W6**：Collector 深化 —— RSS 路由、动态代理池、多步 ReAct
-- **W7**：Research 深化 —— Neo4j 实体/关系抽取、Cypher 查询、RRF 融合
+- **W6**：Collector 深化 —— RSS 路由、动态代理池、多步 ReAct（已完成）
+- **W7**：Research 深化 —— Neo4j 实体/关系抽取、Cypher 1-2 跳查询、
+  RRF 融合（已完成：research 子图检索升级为 hybrid，extracted_entities
+  产出含 graph 路径计数，Analyst 可引用图谱路径）
 - **W8**：finish 前插入 `human_review`（interrupt + Command(resume)），
   chat 前端接入 HITL 审核界面
 - 检查点多 worker 部署：uvicorn 多进程时 AsyncRedisSaver 天然共享（无需

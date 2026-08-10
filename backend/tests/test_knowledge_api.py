@@ -44,6 +44,7 @@ def _wait_ready(client: TestClient, headers: dict[str, str], doc_id: str, timeou
     pytest.fail(f"轮询超时（{timeout}s），doc_id={doc_id}")
 
 
+@pytest.mark.flaky(reruns=2, reruns_delay=5)  # 真实 LLM 问答：限流瞬态自动重试
 def test_upload_list_query_full_flow(
     client: TestClient, auth_headers: dict[str, str], sample_pdf_bytes: bytes
 ) -> None:
