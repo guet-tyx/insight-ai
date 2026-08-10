@@ -18,9 +18,9 @@ from typing import Any, AsyncIterator
 
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
 
+from app.core.checkpointer import ensure_checkpointer, get_checkpointer_sync
 from app.core.config import settings
 from app.services.collector_service import collect
 from app.services.retrieval_service import search as knowledge_search_svc
@@ -87,7 +87,7 @@ def _sse(data: dict) -> str:
 
 
 def build_agent():
-    """构建 ReAct 单 Agent（MemorySaver 内存检查点，thread_id=会话 ID）。"""
+    """构建 ReAct 单 Agent（RedisSaver 持久化检查点，thread_id=会话 ID）。"""
     if not settings.openai_api_key:
         raise RuntimeError("LLM 未配置（OPENAI_API_KEY）")
     llm = ChatOpenAI(
@@ -99,7 +99,7 @@ def build_agent():
     return create_react_agent(
         llm,
         tools=[knowledge_search, collect_webpage],
-        checkpointer=MemorySaver(),
+        checkpointer=get_checkpointer_sync(),  # RedisSaver 持久化（W5），Redis 不可用降级 Memory
         prompt=SYSTEM_PROMPT,
     )
 
@@ -110,9 +110,8 @@ _agent = None
 def get_agent():
     """全局单例 Agent。
 
-    ⚠️ 必须复用同一实例：各请求共享同一个 MemorySaver 检查点，
-    否则每次请求新建实例会导致多轮会话记忆完全丢失。
-    （多进程部署需切换 RedisSaver，W5 落地）
+    ⚠️ 必须复用同一实例：各请求共享同一检查点（RedisSaver），
+    否则多轮会话记忆完全丢失；单实例 + 持久化检查点支持重启保留。
     """
     global _agent
     if _agent is None:
@@ -126,6 +125,7 @@ async def stream_sse(session_id: str, message: str) -> AsyncIterator[str]:
     通过独立任务消费 agent.astream（避免心跳超时取消中断工具执行），
     事件经 asyncio.Queue 转发；空白超时发 ": ping" 心跳。
     """
+    await ensure_checkpointer()  # 先在本事件循环内构建检查点（幂等），再取图
     agent = get_agent()
     config = {"configurable": {"thread_id": session_id}}
     queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()

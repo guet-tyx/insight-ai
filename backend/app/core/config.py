@@ -25,6 +25,8 @@ class Settings(BaseSettings):
 
     # ---- 数据库 ----
     database_url: str = "sqlite:///./insightai.db"
+    # 检查点后端：redis（默认，AsyncRedisSaver 持久化）| memory（测试/降级）
+    checkpointer_backend: str = "redis"
 
     # ---- 基础设施（后续周次使用）----
     milvus_uri: str = "http://127.0.0.1:19530"
@@ -46,6 +48,7 @@ class Settings(BaseSettings):
 
     # ---- 浏览器采集（W3）----
     browser_proxy_list: str = ""  # 代理池，逗号分隔；空 = 直连（本机开发默认）
+    collector_allow_internal: bool = False  # SSRF 防护；仅本地演示/测试时置 true
 
     app_name: str = "Insight AI"
     app_version: str = "0.1.0"

@@ -85,8 +85,10 @@ services:
       retries: 3
 
   # ---------- 状态存储（HITL 检查点 / 异步任务） ----------
+  # 注意：langgraph-checkpoint-redis 依赖 RediSearch/JSON 模块，
+  # 官方 redis 镜像不含，必须用 redis-stack-server（同端口兼容）
   redis-state-store:
-    image: redis:7-alpine
+    image: redis/redis-stack-server:7.2.0-v10
     container_name: insight-redis
     ports:
       - "6379:6379"

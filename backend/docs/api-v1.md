@@ -24,6 +24,9 @@
 | POST | `/chat/sessions` | ✅ W4 | 创建会话 → `{session_id}`（多轮上下文 thread_id） |
 | GET | `/chat/sessions/{id}/messages` | ✅ W4 | 会话最近 20 条 user/assistant 历史（未知会话 404） |
 | POST | `/chat/sessions/{id}/messages` | ✅ W4 | 发消息 → **SSE 流式** Agent 执行事件（见下方协议） |
+| POST | `/agents/runs` | ✅ W5 | 启动 Supervisor-Worker 多智能体任务：`{instruction}` → **202** + run_id（后台执行） |
+| GET | `/agents/runs/{id}/stream` | ✅ W5 | SSE 阶段事件流：`stage`（supervisor 决策/collector/research/analyst）→ `done`（final_report）/`error` |
+| GET | `/agents/runs/{id}` | ✅ W5 | 任务状态（stages 明细 + final_report），运行中/完成/失败 |
 | POST | `/chat/sessions` | 🚧 W4 | 创建对话会话 |
 | POST | `/chat/sessions/{id}/messages` | 🚧 W4 | 发消息，SSE 流式返回 |
 | POST | `/agents/runs` | 🚧 W5 | 启动多智能体复合分析任务 |
@@ -63,8 +66,23 @@ data: {"type": "error", "message": "错误摘要"}
 
 - 工具执行长耗时期间每 15s 输出 `: ping` 心跳注释行（防中间层断流）
 - ⚠️ deepseek-v4-flash 推理模型的 `reasoning_content` 已被后端过滤，不会出现在 token 事件
-- ⚠️ 会话记忆依赖 LangGraph 检查点单例（MemorySaver）；当前后端为**单进程部署**，
-  多 worker 部署需切换 RedisSaver（W5）
+- ⚠️ 会话记忆依赖 LangGraph 检查点（W5 起为 **AsyncRedisSaver**，跨重启保留）；
+  当前后端为单进程部署，多 worker 天然共享 Redis 检查点
+
+## agents 多智能体事件协议（W5）
+
+`POST /api/v1/agents/runs` 启动后在 `GET /runs/{id}/stream` 收流：
+
+```
+data: {"type": "stage", "stage": "supervisor", "next": "research", "detail": "将任务交给 research"}
+data: {"type": "stage", "stage": "collector", "detail": "采集产出 2 条"}
+data: {"type": "stage", "stage": "research", "detail": "检索片段 3 条"}
+data: {"type": "stage", "stage": "analyst", "detail": "报告生成 1200 字"}
+data: {"type": "done", "answer": "## 概述\n...（Markdown 报告全文）"}
+```
+- 事件在后台 `astream(updates)` 逐阶段推送，`run_id` 即 LangGraph thread_id
+- 状态查询 `GET /runs/{id}`：`status: running/ready/failed` + `stages[]` + `final_report`
+- 拓扑与状态 Schema 详见 `docs/agents-design.md`
 
 ## 前端对接要点（W4 备忘）
 

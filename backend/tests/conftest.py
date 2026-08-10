@@ -14,6 +14,9 @@ import pytest
 # ---- 在导入 app 前注入测试库路径（临时文件，避免污染开发库）----
 _tmp_db = Path(tempfile.mkdtemp(prefix="insightai-test-")) / "test.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp_db.as_posix()}"
+# 测试环境强制内存检查点：pytest 每请求独立事件循环，AsyncRedisSaver 跨循环
+# 连接复用会报『事件循环已关闭』；Redis 持久化由独立测试用例覆盖
+os.environ["CHECKPOINTER_BACKEND"] = "memory"
 
 
 from fastapi.testclient import TestClient  # noqa: E402

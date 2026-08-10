@@ -59,6 +59,7 @@ class BrowserSessionManager:
 
     _instance: "BrowserSessionManager | None" = None
     _session: Any = None  # BrowserSession，惰性初始化
+    _session_loop_id: int | None = None  # 创建时的 asyncio 事件循环标识
     _proxy_index: int = 0
 
     def __new__(cls) -> "BrowserSessionManager":
@@ -85,7 +86,13 @@ class BrowserSessionManager:
         """获取（必要时创建）全局唯一的 BrowserSession。
 
         反检测基线：随机 UA + 中文语言头 + 无沙箱参数 + 代理（若配置）。
+        事件循环变更时自动重建：playwright 连接绑定创建时的 loop，
+        跨循环复用（uvicorn --reload / 测试多循环）会导致『事件循环已关闭』。
         """
+        loop = asyncio.get_running_loop()
+        if self._session is not None and self._session_loop_id != id(loop):
+            logger.warning("事件循环已变更，重建 BrowserSession（旧连接绑定旧 loop）")
+            self._session = None
         if self._session is None:
             _, BrowserSession = _load_browser_use()
             proxy = self._next_proxy()
@@ -101,6 +108,7 @@ class BrowserSessionManager:
                     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
                 },
             )
+            self._session_loop_id = id(loop)
             logger.info("BrowserSession 已创建 (proxy=%s)", proxy or "直连")
         return self._session
 
