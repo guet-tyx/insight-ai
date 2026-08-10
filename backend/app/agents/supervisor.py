@@ -48,6 +48,10 @@ class RouterPlan(BaseModel):
 
 
 def _router_llm() -> ChatOpenAI:
+    """路由决策使用主模型：with_structured_output 依赖服务端 guided grammar
+    （xgrammar）约束，lite 模型（sensenova-6.7-flash-lite）网关侧缺模块会 400，
+    实测确认后保持主模型保证路由稳定性（lite 用于 judge 等无约束轻任务）。
+    """
     if not settings.openai_api_key:
         raise RuntimeError("LLM 未配置（OPENAI_API_KEY）")
     return ChatOpenAI(

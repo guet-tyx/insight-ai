@@ -133,6 +133,21 @@ class BrowserSessionManager:
             temperature=0,
         )
 
+    def build_judge_llm(self) -> Any:
+        """任务完成判定（二分类）等轻量辅助：lite 模型省成本。
+
+        ⚠️ 不能用 with_structured_output（lite 网关缺 xgrammar 模块）；
+        judge 为普通 chat 调用，兼容。
+        """
+        from browser_use.llm.openai.chat import ChatOpenAI
+
+        return ChatOpenAI(
+            model=settings.llm_model_lite,
+            api_key=settings.openai_api_key,
+            base_url=settings.llm_base_url,
+            temperature=0,
+        )
+
     async def execute_task(
         self,
         task_instruction: str,
@@ -160,6 +175,7 @@ class BrowserSessionManager:
                     llm=llm,
                     browser_session=session,
                     output_model_schema=output_model,
+                    judge_llm=self.build_judge_llm(),  # lite 模型做完成判定（省成本）
                     use_vision=False,          # deepseek-v4-flash 非视觉模型
                     max_failures=3,            # 内置步骤级重试
                     llm_timeout=120,

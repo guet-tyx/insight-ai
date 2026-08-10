@@ -38,7 +38,8 @@ class Settings(BaseSettings):
     # ---- LLM 推理（SenseNova 网关，OpenAI 兼容协议）----
     openai_api_key: str = ""  # OPENAI_API_KEY：网关 Token，供 ChatOpenAI 使用
     llm_base_url: str = "https://token.sensenova.cn/v1"
-    llm_model: str = "deepseek-v4-flash"
+    llm_model: str = "deepseek-v4-flash"  # 主模型：复杂推理/分析/浏览器操作
+    llm_model_lite: str = "sensenova-6.7-flash-lite"  # 轻量模型：路由决策等低成本任务
 
     # ---- Embedding（硅基流动，OpenAI 兼容协议）----
     siliconflow_api_key: str = ""
