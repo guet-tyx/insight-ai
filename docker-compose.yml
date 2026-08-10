@@ -1,0 +1,106 @@
+# Insight AI 基础设施编排（开发环境）
+# 覆盖：Milvus 向量库(etcd+minio)、Neo4j 图库、Redis 状态存储
+# 应用容器（backend/frontend/mcp-*）在 W11 阶段并入本文件
+name: insightai
+
+services:
+  # ---------- 向量数据库（GraphRAG 密集向量检索） ----------
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    container_name: insight-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd-data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: insight-minio
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    volumes:
+      - minio-data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  milvus-standalone:
+    image: milvusdb/milvus:v2.5.9
+    container_name: insight-milvus
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - milvus-data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    depends_on:
+      - etcd
+      - minio
+
+  # ---------- 图数据库（GraphRAG 拓扑查询） ----------
+  neo4j-graph:
+    image: neo4j:5.26-community
+    container_name: insight-neo4j
+    environment:
+      - NEO4J_AUTH=neo4j/insightai-neo4j
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=1G
+    volumes:
+      - neo4j-data:/data
+    ports:
+      - "7474:7474"   # HTTP 浏览器控制台
+      - "7687:7687"   # Bolt 驱动连接
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 30s
+      start_period: 30s
+      timeout: 10s
+      retries: 3
+
+  # ---------- 状态存储（HITL 检查点 / 异步任务） ----------
+  redis-state-store:
+    image: redis:7-alpine
+    container_name: insight-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  etcd-data:
+  minio-data:
+  milvus-data:
+  neo4j-data:
+  redis-data:

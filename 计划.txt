@@ -1,0 +1,121 @@
+Insight AI：基于多智能体协作与MCP架构的情报分析平台工程化实施与落地方案平台定位与工程能力映射大语言模型（LLM）的快速演进推动了软件工程范式向自主智能体（AI Agent）架构的变革。然而，在面对跨领域信息搜集、动态网页深度解析、长文档语义理解及结构化报告生成等复杂业务场景时，单智能体架构普遍存在上下文窗口溢出、多步骤推理中的幻觉累积，以及工具调用控制力不足等工程瓶颈。Insight AI 平台被设计为一个基于 LangGraph 多智能体编排框架与 Model Context Protocol (MCP) 开放插件标准构建的生产级情报分析平台，旨在通过确定性状态机与非确定性大模型推理的结合，解决复杂长链条任务的执行稳定性问题。平台的工程价值不仅体现在大语言模型的对话交互上，更重点展示了 Agent 多任务协同、GraphRAG 复合检索、分布式插件扩展以及云原生后端架构的综合落地能力。针对 AI Agent 工程师、大模型应用工程师及后端 AI 工程师等目标岗位，平台将核心工程实践与技术考核点进行了精准对接。目标岗位核心能力需求Insight AI 中的工程实践与技术落地AI Agent 工程师多 Agent 编排、状态机控制、Human-in-the-Loop、工具调用链优化基于 LangGraph 搭建 Supervisor-Worker 层次化协作网络，设计隔离式子图（Subgraph）状态管理，并引入基于 interrupt 与 Command(resume=...) 的人机协作校验机制。LLM 应用工程师高阶 RAG 范式、知识图谱融合、Prompt 工程、非结构化数据 Pipeline搭建融合 Milvus 密集向量检索与 Neo4j 拓扑查询的 GraphRAG 架构；基于 PyMuPDF 实现版面感知解析，引入 Reciprocal Rank Fusion (RRF) 算法进行多路召回重排序。后端 AI 工程师插件化协议实现、高并发异步架构、服务化部署、系统可观测性基于 FastMCP 框架构建微服务化工具集群；基于 FastAPI 实现异步 Serverless 接口，结合 Docker Compose 与 GitHub Actions 完成 CI/CD 全流程自动化部署。多智能体拓扑与 LangGraph 状态机设计层次化 Supervisor-Worker 拓扑逻辑Insight AI 采用基于 LangGraph 的层次化 Supervisor-Worker 拓扑结构构建多智能体协同网络。在全局流转中，顶层设有一个 Supervisor Agent 作为系统的核心协调者，负责接收用户输入的复合型情报分析指令，并将其动态分解为具体的子任务序列。Supervisor Agent 本身不直接挂载底层具体工具，而是通过 Handoff 工具链将任务路由并分发至各领域的专家 Agent。系统的执行层由三个独立的专家子图节点和一个人机协作节点构成：数据采集专家（Collector Agent）负责非结构化信息的广度搜集，内部挂载 RSS 订阅解析器以及基于 Browser Use 的动态浏览器控制引擎，用于处理复杂动态网页及 Web3 社交媒体的数据抓取。深度研究专家（Research Agent）挂载基于 Milvus 与 Neo4j 的 GraphRAG 检索工具，负责对内部知识库及已采集文档进行精确定位、实体关联挖掘与多源事实交叉验证。归纳分析专家（Analyst Agent）接收采集与研究阶段产生的数据块，进行趋势提炼、对比分析及时间线梳理，按照预设规范生成长篇 Markdown 格式的情报分析报告。人机协作审核节点（HITL Review Node）则在高风险工具调用或报告发布前触发，强行挂起图流转，等待人工复核与意见注入。整体拓扑的数据与控制流转遵循确定性的调度路径。用户指令首先进入 Supervisor Agent 完成任务拆解，随后控制权通过 Handoff 机制流转至 Collector Agent 执行数据抓取；采集结果返回后，控制权交由 Research Agent 进行知识库交叉校验与知识图谱补全；最后由 Analyst Agent 汇总生成报告初稿，并在进入 HITL Review Node 完成人工校验确认后，输出最终分析报告。状态 Schema 设计与 Reducer 机制在 LangGraph 架构中，全局状态（State）是贯穿所有图节点的强类型数据载体。为了应对高并发与异步流转下的状态竞争与覆盖问题，系统采用 Pydantic v3 与 TypedDict 进行状态 Schema 的显式定义，并为增长型数据配置特定的 Reducer 函数。Pythonfrom typing import Annotated, Sequence, TypedDict, List, Dict, Any
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
+
+class GlobalState(TypedDict):
+    # 消息历史，使用 add_messages Reducer 实现增量追加而非直接覆盖
+    messages: Annotated[Sequence[BaseMessage], add_messages]
+    # 任务分发路由指针
+    next_node: str
+    # 抽取出的实体与关系数据缓存
+    extracted_entities: List[Dict[str, Any]]
+    # 采集到的原始网页与文档片段
+    raw_artifacts: List[Dict[str, Any]]
+    # 人工审核反馈指令
+    human_feedback: str
+    # 最终汇总报告内容
+    final_report: str
+为了确保组件间的解耦，各个专家 Agent 被封装为带有私有状态（Private State）的子图（Subgraph）。例如，Collector Agent 拥有专门记录浏览器 Payload 和 HTTP 状态码的私有状态，其内部的重试计数与中间变量不会污染 GlobalState 命名空间，父图仅在子图执行结束（END）后读取其暴露的产出字段，从而保障了状态空间的清洁与隔离。人机协作（HITL）与持久化检查点高严肃性的情报分析场景要求系统具备严格的质量控制原语，以避免大模型的逻辑幻觉或不当动作。系统利用 LangGraph 的 interrupt() 原语与持久化检查点（Checkpointer）机制搭建生产级 HITL 工作流。当 Analyst Agent 完成初稿生成后，控制流自动切入 human_review 节点。该节点直接调用 interrupt() 原语，抛出包含报告初稿的 Payload，同时 LangGraph 挂起当前状态机的执行，并将包含当前节点、变量历史与会话上下文的完整快照序列化写入持久化存储引擎（如 PostgresSaver 或 RedisSaver）。状态挂起后，后端 API 向前端返回带有 thread_id 的待审核状态，并在前端 UI 渲染报告交互界面。用户可执行“批准”、“拒绝”或“输入修改意见”操作。当前端接收到用户反馈后，调用恢复 API 并传入相同的 thread_id 与 Command(resume=user_input) 指令。LangGraph 接收指令后，从检查点反序列化恢复状态，interrupt() 函数直接接收并返回 user_input 变量，随后条件边根据输入内容分支路由：若通过则进入最终输出节点，若未通过则带着修改建议循环回 Analyst Agent 进行针对性重新生成。节点/智能体名称节点类型关联工具/服务状态输入 (State In)状态输出 (State Out)LangGraph 核心原语SupervisorAgent路由协调节点Handoff ToolsGlobalState.messagesnext_nodeStateGraph, add_messages[cite: 3, 7]CollectorAgent专家子图节点Browser Use, RSS APITask Requirementraw_artifactsSubgraph Scoping, TypedDict[cite: 2]ResearchAgent专家子图节点Milvus, Neo4jSearch Queryextracted_entities, Semantic ChunksSubgraph Scoping, Hybrid SearchAnalystAgent归纳生成节点Prompt TemplatesMulti-source Artifactsfinal_report (Draft)LLM Structured OutputHumanReviewNode人工干预节点Interruption APIDraft Reporthuman_feedbackinterrupt(), Command(resume=...)[cite: 2]混合检索与知识图谱 (GraphRAG) 架构设计版面感知文档解析与语义分块传统基于固定字符长度的分块算法容易切割完整的段落语义，导致上下文断裂。Insight AI 平台采用 PyMuPDF 构建具有版面感知能力的文档解析 Pipeline。解析器在读取 PDF 文档时，首先提取 Layout 树并识别文本块的字体大小、BBox 坐标与样式属性；其次，利用基于规则与小模型的语义分块策略（Semantic Chunking），根据 H1-H3 标题树对文档进行层次化切分，确保完整概念的段落或表格被包裹在单一 Chunk 中。系统会在每个 Chunk 中注入富元数据（包括 doc_id、page_number、parent_header 及 created_at 等），为后续的精确召回与溯源提供支持。密集向量与 Neo4j 拓扑图谱的双路索引纯向量检索在面对“某公司近三年的投资路线变迁与技术演进”等跨文档、多跳（Multi-hop）推导查询时，容易丢失全局拓扑关联。系统设计了向量数据库（Milvus）与图数据库（Neo4j）协同的双路索引架构（GraphRAG）。在数据写入阶段，非结构化文档经由 PyMuPDF 解析分块后分为两路处理：一路生成高维密集向量并存入 Milvus 数据库，配置 HNSW（Hierarchical Navigable Small World）索引以提供高性能的余弦相似度（Cosine Similarity）检索；另一路将 Chunk 送入 LLM 实体关系抽取模块，依据预设的领域本体（包含 Company、Technology、Person、Paper、Event 等节点类型以及 DEVELOPED、INVESTED_IN、AUTHORED 等关系类型）提炼出三元组，生成 Cypher 语句写入 Neo4j 拓扑图数据库中。在数据检索阶段，Research Agent 同时向 Milvus 发起向量相似度查询，并向 Neo4j 发起 Cypher 拓扑路径匹配查询。两路召回的异构数据片段在 RRF 融合引擎中完成打分与重排序，最终组合为高质量上下文输出给大模型。混合检索与倒数秩融合（RRF）算法当 Research Agent 发起检索请求时，向量检索路径基于余弦相似度从 Milvus 中召回 Top-K（如 $K=20$）个语义相关 Chunk；图谱检索路径从查询词中识别核心实体，并在 Neo4j 中执行 1-2 跳的 Cypher 关联匹配（如 MATCH (c:Company {name: $x})-[r:DEVELOPED]->(t:Technology) RETURN c, r, t），将拓扑图关系转化为自然语言描述段落。系统使用倒数秩融合（Reciprocal Rank Fusion, RRF）算法计算异构结果的最终权重，其数学公式如下：$$\text{RRF\_Score}(d \in D) = \sum_{m \in M} \frac{1}{k + r_m(d)}$$其中，$M$ 表示检索路径集合（向量检索与图检索），$r_m(d)$ 表示文档片段 $d$ 在路径 $m$ 中的排名得分，$k$ 为平滑常数（默认设为 $60$）。通过对异构结果进行 RRF 分数降序排列并截取 Top-N（如 $N=5$）优质片段，系统在控制上下文 Token 开销的同时，显著提升了复杂回答的精准度与可信度。数据处理阶段核心技术组件处理逻辑/算法性能/质量指标文档解析与切分PyMuPDF, Pydantic版面感知解析 + 基于 H1-H3 标题树的语义切分单页解析耗时 $<100\text{ms}$，结构完整度 $>95\%$向量索引构造Milvus, OpenAI EmbeddingsHNSW 索引构造，$M=16, \text{efConstruction}=200$向量检索延迟 $<20\text{ms}$ (100万级向量)知识图谱构造Neo4j, LLM Extraction领域本体映射，Cypher 参数化 Batch 写入实体抽取准确率 $>88\%$，无环路径生成混合结果融合Custom Python Engine倒数秩融合算法（Reciprocal Rank Fusion, $k=60$）NDCG@5 相比单向量检索提升 $22\%$动态网页采集与 Browser Use 执行引擎浏览器 Agent 封装与会话池管理面对依赖复杂 JavaScript 动态渲染或具备严格反爬机制的网站，传统的 HTTP 客户端（如 requests、httpx）无法获取有效 DOM。系统通过封装 browser-use 库开发了专属的 core/browser_agent.py 采集引擎。为了避免频繁启动和销毁 Chromium 实例带来的系统开销，系统设计了 BrowserSessionManager 单例管理器。该管理器维护一个异步浏览器上下文池（Browser Context Pool），实现了浏览器实例复用、Cookie 状态持久化以及并发请求数控制。Pythonimport asyncio
+from browser_use import Agent, Browser, BrowserConfig
+
+class BrowserSessionManager:
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            # 配置 Playwright 浏览器，包含防检测参数与代理
+            cls._instance.config = BrowserConfig(
+                headless=True,
+                disable_security=True,
+                extra_chromium_args=["--no-sandbox", "--disable-setuid-sandbox"]
+            )
+            cls._instance.browser = Browser(config=cls._instance.config)
+        return cls._instance
+
+    async def execute_task(self, task_instruction: str, llm_model) -> str:
+        # 创建隔离的上下文，避免会话间数据污染
+        context = await self.browser.new_context()
+        try:
+            agent = Agent(
+                task=task_instruction,
+                llm=llm_model,
+                browser_context=context
+            )
+            result = await agent.run()
+            return result
+        finally:
+            await context.close()
+动态抗封禁策略与 DOM 解析在执行深度采集任务时，Collector Agent 采取了多重工程防护手段：第一，系统配置了动态 HTTP/SOCKS5 代理池轮换，针对高频访问的域名自动分发不同的出口 IP，规避 IP 频次限制。第二，利用 Playwright 脚本注入模拟人类行为，包括随机鼠标移动轨迹、平滑滚动及键盘击键延迟，降低自动化检测特征。第三，利用 browser-use 将网页的 Accessibility Tree 与 DOM 结合，过滤冗余的 CSS 与 JS 样式节点，仅将带有语义的交互节点映射为带有数字标记的节点树，降低输入给 LLM 的 Token 体积。第四，在信息提炼阶段，强制要求 Agent 将非结构化网页数据解析并填充至 Pydantic 定义的结构化 Schema 中，利用 Pydantic v3 的高性能校验引擎保障输出格式的合法性。FastMCP 插件化工具系统与扩展范式Model Context Protocol (MCP) 标准选型Model Context Protocol (MCP) 是一种旨在标准化大语言模型与外部工具及数据源双向连接的开放协议。传统的工具调用通常将工具逻辑直接嵌入主工程，导致工具与 Agent 强耦合、难以独立部署与扩缩容。Insight AI 引入 MCP 标准，将 Browser Use 采集服务、Milvus 向量检索器及 Neo4j 图查询器重构为独立的 MCP Server。系统选择 Python 生态中的 FastMCP 2.0 框架进行二次开发。FastMCP 封装了底层 JSON-RPC 2.0 协议细节、自动 Schema 生成、输入校验及 Transport 管道管理，使工具开发者能够集中精力于业务逻辑实现。在整体架构中，Insight AI 主工程充当 MCP Client 的角色，通过标准化的传输通道（如 Streamable HTTP 或 SSE）向分布式的 FastMCP Server 集群发起能力发现与工具调用请求。这种解耦设计使得工具可以在独立的微服务容器中运行，实现了工具的横向扩展与安全隔离。工具与资源的暴露范式基于 FastMCP 2.0 框架，系统将外部能力划分为工具（Tools）与资源（Resources）两类暴露原语：工具代表带副作用的可执行函数（如发起网页抓取或写入数据库节点）；资源代表只读的数据源（如获取知识库配置或查看服务运行状态）。Python# mcp_server/browser_mcp.py
+from fastmcp import FastMCP
+from pydantic import BaseModel, Field
+
+# 初始化 FastMCP 服务实例
+mcp = FastMCP(name="BrowserToolService")
+
+class FetchRequest(BaseModel):
+    url: str = Field(description="目标采集网页的完整 URL")
+    extraction_goal: str = Field(description="需要提取的信息说明")
+
+@mcp.tool
+async def extract_web_content(request: FetchRequest) -> dict:
+    """使用自动化浏览器访问指定 URL 并根据提取目标归纳信息。"""
+    session_mgr = BrowserSessionManager()
+    content = await session_mgr.execute_task(
+        task_instruction=f"访问 {request.url}，提取：{request.extraction_goal}"
+    )
+    return {"status": "success", "data": content}
+
+@mcp.resource("config://status")
+def get_service_status() -> str:
+    """获取当前 Browser-Use 服务的运行状态与资源占用"""
+    return "Browser-Use Engine: Operational | Active Contexts: 2"
+
+if __name__ == "__main__":
+    # 使用 Streamable HTTP / SSE 模式启动生产服务
+    mcp.run(transport="sse")
+传输协议与热插拔加载机制FastMCP 2.0 原生支持 STDIO、SSE (Server-Sent Events) 以及 Streamable HTTP 三种传输协议。系统在生产部署中优先选用 Streamable HTTP 与 SSE 模式，以支持跨网络的分布式微服务调用。Insight AI 内部实现了 MCPPluginRegistry 注册中心。主系统启动时，通过读取配置文件中记录的 MCP 服务节点端点，利用 fastmcp.Client 自动发起 Capabilities Discovery 握手，动态感知远程 Server 暴露的所有工具与资源 Schema。开发者只需启动新的 FastMCP 服务并向注册中心提交 URL，主系统即可在无需重启服务的情况下实现新工具的热插拔加载。MCP 服务名称协议类型暴露原语类型功能说明身份鉴权与安全边界BrowserMCPSSE / HTTP@mcp.tool[cite: 8, 9]驱动 Headless Chromium 执行动态抓取沙盒环境运行，限制访问内网 IPVectorStoreMCPSTDIO / SSE@mcp.tool[cite: 8, 9]执行 Milvus 向量相似度检索与 Chunk 写入基于 JWT 的 Tenant 级数据隔离GraphStoreMCPStreamable HTTP@mcp.tool[cite: 8, 9]执行 Neo4j Cypher 图路径查询Cypher 参数化校验，防止注入攻击SystemConfigMCPSSE@mcp.resource[cite: 8, 9]暴露知识库 Schema 及模型配置信息只读权限，不暴露敏感 API Key十二周精细化实施计划与工程路线图为确保项目按质按量交付，三个月的开发周期被拆解为十二个紧密衔接的周次计划，覆盖从基础设施搭建、多 Agent 协作开发、GraphRAG 搭建到 MCP 架构重构与 DevOps 部署的全流程。阶段一：基础架构与 MVP 链路打通（第 1 - 4 周）在阶段一中，核心工程目标在于搭建多服务项目骨架，完成基础 RAG 管道搭建与 Browser Use 的初步集成，并跑通单 Agent 驱动的端到端 MVP。第 1 周重点关注项目初始化与架构搭建。任务包括：创建 GitHub 代码仓库，划分 backend/、frontend/ 及 mcp_servers/ 目录结构；搭建 FastAPI 后端基础框架，采用 pyproject.toml (uv) 完成依赖管理；实现基于 JWT 的用户认证模块，设计符合 RESTful 规范的 API 路由。本周交付可运行的后端空框架与 OpenAPI 规范文档初版。第 2 周聚焦于 RAG 知识库 Pipeline 搭建。任务包括：编写 services/pdf_parser.py，基于 PyMuPDF 实现 PDF 文档的版面感知解析与语义切块；部署 Milvus 向量数据库容器，配置向量 Schema 并完成 Embedding 向量写入流程；开发基础检索接口，实现余弦相似度查询。本周交付可独立运行的 RAG 服务，支持文档上传与向量问答。第 3 周进行 Browser Use 集成与初步封装。任务包括：配置 Playwright 浏览器自动化运行环境；开发 core/browser_agent.py，实现 BrowserSessionManager 单例引擎，完成页面加载与异常重试机制；编写简单的自动化脚本，实现指定网页内容的结构化抓取。本周交付独立的浏览器采集模块，能通过自然语言指令完成基础抓取。第 4 周实现单 Agent Demo 与前后端联调。任务包括：使用 LangGraph 创建单 Agent 图结构，集成 RAG 检索与 Browser Use 工具；基于 Next.js 14 与 Tailwind CSS 搭建聊天交互界面，接入 SSE 流式传输协议；完成前后端联调，跑通“用户提问 $\rightarrow$ Agent 调用工具 $\rightarrow$ 返回流式答案”的完整链路。本周完成阶段一里程碑，打通 MVP 端到端核心链路。阶段二：多智能体系统与深度集成（第 5 - 8 周）阶段二的核心目标在于引入 Supervisor-Worker 模式实现多 Agent 编排，深化 Browser Use 采集应用，并集成 Neo4j 构建 GraphRAG 混合检索能力。第 5 周聚焦于 LangGraph 多 Agent 编排设计。任务包括：设计 Supervisor-Worker 协作拓扑结构；实现 SupervisorAgent 路由节点，完成意图识别与 Handoff 工具链开发；基于 Pydantic v3 与 TypedDict 定义全局与私有状态 Schema；引入状态检查点持久化机制。本周交付多 Agent 状态图设计文档与核心路由代码。第 6 周推进 Collector Agent 与 Browser Use 的深度集成。任务包括：开发 CollectorAgent 子图，实现 RSS API 与 Browser Use 的智能路由切换；在 BrowserSessionManager 中加入动态代理池轮换与 Session 复用；设计复杂网页抓取场景，利用 Pydantic 实现网页内容的强类型结构化提取。本周交付功能完善的采集 Agent。第 7 周进行知识图谱构建与融合检索。任务包括：部署 Neo4j 数据库，设计包含实体与关系的领域本体；开发基于 LLM 的实体与关系抽取模块，将非结构化文本转化为图谱节点；实现混合检索模块，将 Milvus 向量检索与 Neo4j Cypher 图查询结果通过 RRF 算法进行融合。本周交付 GraphRAG 检索模块，支持图谱关联查询。第 8 周实现 Research Agent、Analyst Agent 及 HITL 工作流。任务包括：开发 ResearchAgent，实现基于 GraphRAG 的多源信息交叉检验；开发 AnalystAgent，实现 Markdown 分析报告生成；在生成节点后嵌入 interrupt()，实现人机审核卡点与 Command(resume=...) 恢复机制。本周完成阶段二里程碑，多 Agent 协作系统具备处理“分析某领域最新动态”等复合型任务的能力。阶段三：工程化、优化与求职准备（第 9 - 12 周）阶段三的目标是将工具服务重构为 MCP 插件化架构，进行系统性能优化与测试，完成云原生部署，并打磨开源文档与求职材料。第 9 周推进插件系统与 MCP 服务化重构。任务包括：基于 FastMCP 2.0 将 Browser Use、Milvus 检索器及 Neo4j 查询器改造为独立的 MCP Server；定义标准的 @mcp.tool 与 @mcp.resource；实现 MCPPluginRegistry 注册中心，支持工具的热插拔加载。本周交付可扩展的 MCP 工具服务器集群。第 10 周进行性能优化与自动化测试。任务包括：优化系统 Prompt 与 Few-shot 示例，降低 Agent 工具调用的幻觉率；基于 Pytest 编写单元测试与集成测试套件，验证关键节点的状态流转；对向量数据库与图数据库查询进行压测与索引优化。本周交付高覆盖率的测试套件与性能优化报告。第 11 周部署、CI/CD 与可观测性搭建。任务包括：编写 docker-compose.yml 统一编排全栈服务；配置 GitHub Actions 实现自动化 Lint、测试与镜像构建；将平台部署至云服务器；集成 LangSmith 实现全链路 Trace 监控。本周交付在线可访问的 Demo 站点与全链路 Trace 面板。第 12 周完成文档归档与求职材料打磨。任务包括：撰写高质量 GitHub README（包含架构图、技术亮点及快速启动指南）；录制 3 分钟技术演示视频；提炼简历项目描述，准备针对 AI Agent、大模型应用及后端工程师岗位的技术面试提纲。本周完成阶段三里程碑，发布生产级开源作品集。十二周工程实施路线矩阵周次模块分类核心技术任务依赖/技术栈交付成果与里程碑风险管理与应对策略W1基础架构GitHub 仓库搭建、FastAPI 异步骨架、JWT 用户认证模块FastAPI, PyCharm, Pydantic, uv, JWT基础 Server 可运行，RESTful API 初始文档依赖版本冲突：强制使用 uv.lock 进行严格版本锁定W2数据 PipelinePDF 智能解析切分、Milvus 向量数据库初始化、密集检索 APIPyMuPDF, Milvus, LangChain-Text-Splitters可运行的 RAG 服务，支持 PDF 文件上传与向量问答大文件 PDF 解析超时：引入 Celery / Redis 异步任务队列W3工具开发Browser Use 环境配置、Playwright 驱动、BrowserSessionManager 开发Playwright, browser-use, asyncio独立的 Web 采集模块，支持自然语言指令控制浏览器反爬阻断：集成动态代理池与随机 Header 注入机制W4前后端 MVPLangGraph 极简单 Agent 搭建、Next.js 14 流式聊天界面、前后端 SSE 联调Next.js, LangGraph, Tailwind CSS, SSE阶段一里程碑：端到端 MVP 演示系统打通SSE 传输中断：前端实现自动重连与 Token 心跳包W5多智能体Supervisor-Worker 状态机架构设计、GlobalState 与 Reducers 编写LangGraph, Pydantic v3多 Agent 状态图设计文档与核心路由代码框架节点无限死循环：在 Supervisor 中设置最大 Loop 次数机制W6采集增强CollectorAgent 编写、多工具智能切换路由、动态网页结构化抽取browser-use, RSSHub, Pydantic具备高抗封禁能力的采集专家 AgentDOM 变化导致抽取失败：回退机制改为 LLM 纯文本重组W7图检索Neo4j 部署、领域本体映射、实体关系提取 Pipeline、RRF 混合检索Neo4j, Cypher, Milvus, Custom RRF EngineGraphRAG 服务，支持拓扑关系关联查询图查询性能瓶颈：对常用查询路径的节点 Attribute 建立索引W8系统合成Research/Analyst Agent 实现、interrupt 节点嵌入、HITL 界面集成LangGraph, React Markdown, Command API阶段二里程碑：可处理复杂指令的多 Agent 协作系统HITL 状态丢失：采用 Postgres 引擎做持久化 CheckpointW9插件化架构FastMCP 服务化重构、工具/资源暴露、MCPPluginRegistry 实现FastMCP 2.0, JSON-RPC, SSE / HTTP可扩展的 MCP 工具服务器，支持热插拔新工具MCP 握手超时：设置 Client 建立连接超时与重试逻辑W10优化压测Agent Prompt 迭代修正、Pytest 套件编写、向量检索性能压测Pytest, Locust, LangSmith高测试覆盖率（$>80\%$）与性能压测优化报告幻觉率过高：引入 Few-Shot 标准示例与 Guardrails 校验W11云原生 DevOpsDocker Compose 多容器编排、GitHub Actions 搭建、云服务器部署Docker, GitHub Actions, AWS/阿里云, LangSmith在线可访问的 Demo 演示站点与 CI/CD Pipeline镜像体积过大：采用 Multi-stage Docker 镜像构建W12文档与求职项目技术文档整理、Demo 视频录制、简历项目经历优化与面试准备Markdown, Loom/OBS, Resume Builder阶段三里程碑：生产级个人工程作品集完全发布面试工程细节阐述不足：绘制完整架构流转图与序列图生产级工程部署、性能优化与可观测性体系Docker Compose 容器化部署编排系统采用 Docker Compose 进行云端部署与容器编排，确保开发与生产环境的一致性。编排文件中涵盖的微服务组件包括：FastAPI 主后端容器 (insight-backend)、Next.js 14 前端容器 (insight-frontend)、独立的 Browser Use MCP 微服务容器 (mcp-browser-server)、向量与图检索 MCP 微服务容器 (mcp-retrieval-server)、Milvus 向量数据库、Neo4j 图数据库，以及用于状态持久化与缓存的 Redis 实例。YAMLversion: '3.8'
+
+services:
+  insight-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis-state-store:6379/0
+      - MILVUS_HOST=milvus-standalone
+      - NEO4J_URI=bolt://neo4j-graph:7687
+    depends_on:
+      - redis-state-store
+      - milvus-standalone
+      - neo4j-graph
+
+  mcp-browser-server:
+    build:
+      context: ./mcp_servers
+      dockerfile: Dockerfile.browser
+    ports:
+      - "8001:8001"
+    environment:
+      - DISPLAY=:99
+
+  redis-state-store:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  milvus-standalone:
+    image: milvusdb/milvus:v2.3.0
+    ports:
+      - "19530:19530"
+
+  neo4j-graph:
+    image: neo4j:5.12-community
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/password123
+全链路可观测性与 Trace 监控为了解决大模型系统中因非确定性引起的死循环、工具调用失败及 Token 资源浪费问题，系统深度集成 LangSmith 可观测性平台。每次用户请求均会被赋予唯一的 trace_id。LangSmith 实时记录从 SupervisorAgent 分发路由，到各专家 Agent 子图内部推理，再到底层 MCP 工具调用的完整 Trace 树。系统对每个节点的输入 Prompt、输出 Content、温度参数、执行延迟及 Token 消耗量进行持续监控。同时，系统设定了状态漂移熔断规则：若某个 Agent 在单个会话中连续调用相同工具超过 3 次，或状态图迭代步骤超过 20 步，系统将抛出异常并自动终止执行，防止产生异常开销。针对长文档分析场景，系统在 Analyst Agent 前置了上下文动态压缩节点，通过预判 Token 计算并在必要时触发摘要 Reducer，将上下文体积控制在最优质的区间内。结论与工程价值评估Insight AI 平台的工程实施方案通过严谨的技术选型与模块化设计，展示了现代化 AI Agent 系统的工程化落地路径。项目将 LangGraph 的强类型确定性状态机与 FastMCP 的开放式插件扩展标准相融合，有效解决了复杂情报分析场景下的上下文丢失、智能体失控及工具解耦困难等行业典型工程痛点。在技术能力评估与求职匹配度层面，该平台体现了以下核心工程优势：系统架构层面，平台展现了多智能体层次化编排、子图隔离、状态机持久化以及人机协作（HITL）断点恢复等高阶 Agent 工程能力；算法与数据层面，平台实现了 GraphRAG 密集向量与拓扑图谱的复合检索，利用 RRF 算法提升了复杂回答的精准度；微服务与后端层面，平台完成了基于 FastMCP 2.0 的工具服务化改造，具备云原生部署、CI/CD 自动化流水线及全链路 Trace 可观测性。这份精细化的十二周实施计划，不仅为项目开发提供了明确的技术蓝图，也构成了能够展示复合技术实力的生产级工程作品集。
