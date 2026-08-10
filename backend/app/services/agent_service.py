@@ -52,7 +52,7 @@ async def collect_webpage(url: str, instruction: str) -> str:
 
     注意：浏览器操作需要约 20-60 秒；结果可能为结构化 JSON 或文本。
     """
-    data = await collect(url, instruction)
+    data = await collect(url, instruction, source="web")
     return json.dumps(data, ensure_ascii=False) if isinstance(data, dict) else str(data)
 
 
@@ -95,6 +95,8 @@ def build_agent():
         api_key=settings.openai_api_key,
         base_url=settings.llm_base_url,
         temperature=0,
+        max_retries=4,  # 网关侧 429 限流瞬时抖动消化
+        request_timeout=120,
     )
     return create_react_agent(
         llm,

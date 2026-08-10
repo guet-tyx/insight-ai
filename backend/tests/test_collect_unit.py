@@ -120,3 +120,62 @@ def test_schema_type_validation() -> None:
     })
     with pytest.raises(ValidationError):
         model(age="not-a-number")
+
+
+# ---------- W6：连接类失败自动换代理重试 ----------
+
+def test_connection_error_detection() -> None:
+    from app.core.browser_agent import _is_connection_error
+
+    class _Fake:
+        pass
+
+    assert _is_connection_error(ConnectionError("refused"))
+    assert _is_connection_error(TimeoutError("timeout"))
+    assert _is_connection_error(ValueError("Failed to connect to proxy"))
+    assert _is_connection_error(RuntimeError("dns resolution failed"))
+    assert not _is_connection_error(ValueError("Agent 未产出任何结果"))
+    assert not _is_connection_error(None)
+
+
+def test_proxy_retry_rebuilds_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """连接类失败 → 换代理并重建会话（断言会话重建与轮换次数）。"""
+    import asyncio
+
+    from app.core import browser_agent as mod
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "browser_proxy_list", "http://p1:8080,http://p2:8080")
+    monkeypatch.setattr(settings, "collector_max_proxy_retries", 2)
+    mgr = mod.BrowserSessionManager()
+    mgr._proxy_index = 0  # noqa: SLF001
+    mgr._session = object()  # noqa: SLF001 — 伪造已建会话
+    mgr._session_loop_id = None  # noqa: SLF001
+
+    calls = {"attempts": 0}
+
+    class _FakeAgent:
+        def __init__(self, *_a, **_k):
+            pass
+
+        async def run(self, **_k):
+            calls["attempts"] += 1
+            raise ConnectionError("connect timeout")
+
+    class _FakeBrowserSession:
+        """占位 BrowserSession：任意构造参数均可接受。"""
+
+        def __init__(self, *_a, **_k):
+            pass
+
+    monkeypatch.setattr(mod, "_Agent", _FakeAgent)
+    monkeypatch.setattr(mod, "_load_browser_use", lambda: (_FakeAgent, _FakeBrowserSession))
+
+    async def _run():
+        with pytest.raises(mod.CollectorError):
+            await mgr.execute_task("任务", max_attempts=2)
+
+    asyncio.run(_run())
+    # 初始 + 各失败重试 → 多次尝试；代理轮换启用后会话至少重建一次
+    assert calls["attempts"] >= 2
+    assert mgr._proxy_index >= 2  # noqa: SLF001 — 池已轮换

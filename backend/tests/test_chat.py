@@ -52,6 +52,7 @@ def test_messages_unknown_session_404(client: TestClient, auth_headers: dict[str
 
 
 @pytest.mark.skipif(not INFRA_READY, reason="LLM Key 未就绪")
+@pytest.mark.flaky(reruns=2, reruns_delay=5)  # 真实 LLM：网关 429 限流瞬态自动重试
 def test_end_to_end_stream_with_knowledge_tool(
     client: TestClient, auth_headers: dict[str, str], sample_pdf_bytes: bytes
 ) -> None:
@@ -103,6 +104,7 @@ def test_end_to_end_stream_with_knowledge_tool(
 
 
 @pytest.mark.skipif(not INFRA_READY, reason="LLM Key 未就绪")
+@pytest.mark.flaky(reruns=2, reruns_delay=5)
 def test_multiturn_context(client: TestClient, auth_headers: dict[str, str]) -> None:
     """多轮上下文：第二问引用第一问的会话记忆（MemorySaver thread_id）。"""
     session = client.post("/api/v1/chat/sessions", headers=auth_headers).json()["session_id"]

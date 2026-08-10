@@ -1,35 +1,105 @@
-"""Collector 专家子图：网页采集（browser-use），私有状态隔离。
+"""Collector 专家子图：多工具智能路由（RSS / 静态抓取 / 浏览器） + 强类型结构化提取（W6）。
 
-子图输入：task_requirement（Supervisor 拆解的任务指令，含 URL）
-子图输出：raw_artifacts（采集结果，映射进 GlobalState）
-私有字段（retry_count/browser_payload）不进入父图 checkpoint。
-W5 为单步采集（任务含 URL 即采）；W6 深化为多步 ReAct + RSS 路由。
+路由策略（对应计划「RSS API 与 Browser Use 智能路由切换」）：
+  1. fetch_rss      — RSS/Atom 快速解析（feedparser，快、无反爬压力，首选）
+  2. fetch_static   — 静态页 httpx 抓取（轻量；JS 渲染/缺内容时换浏览器）
+  3. collect_webpage— browser-use 动态采集（兜底/复杂页）
+LLM（ReAct）决策 + 系统提示词引导 RSS 特征优先；工具失败自动降级下一种
+= 计划风险表「DOM 变化导致抽取失败：回退机制改为 LLM 纯文本重组」落地。
+
+私有状态（CollectorState）：task_requirement / url / raw_artifacts /
+retry_count / browser_payload / source_type —— 不进入父图 checkpoint。
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
 from typing import Any
 
+from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
+from langgraph.prebuilt import create_react_agent
 
 from app.agents.state import CollectorState
 from app.core.config import settings
 from app.services.collector_service import collect as run_collect
+from app.services.rss_service import fetch_rss, looks_like_rss_url
 
 logger = logging.getLogger(__name__)
 
-# 支持带协议或裸域名（Supervisor 子任务常用 "example.com" 写法）
 URL_PATTERN = re.compile(r"(https?://)?(?:[\w-]+\.)+[a-zA-Z]{2,}(?::\d+)?(?:[/?#][^\s，。;；]*)?")
-
-# 本地演示开关（.env COLLECTOR_ALLOW_INTERNAL=true）；默认严格禁内网（SSRF 防护）
 ALLOW_INTERNAL = settings.collector_allow_internal
+
+COLLECTOR_PROMPT = """你是数据采集专家（Collector Agent）。根据任务指令选择最合适的采集工具：
+
+1. fetch_rss：目标 URL 是 RSS/Atom 提要（路径含 feed/rss/.xml，或指令含"订阅源/feed"）时首选，
+   解析快且结构化（返回 title/link/published/summary 列表）。
+2. fetch_static：普通静态网页（内容不依赖 JavaScript 渲染）时使用，轻量快速。
+3. collect_webpage：动态渲染/复杂网页，或 fetch_static 内容不足时使用；约需 20-60 秒。
+
+规则：优先低成本工具；一个工具失败或内容不足时换下一个（自动降级）；
+若任务未给出 URL，直接说明缺失信息。结果保持事实，不要编造。"""
+
+
+async def _fetch_static_impl(url: str) -> str:
+    """静态页抓取：httpx 拉取，去标签保留正文文本。"""
+    import httpx
+    import re as _re
+
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True,
+                                 headers={"User-Agent": "Mozilla/5.0 InsightAI/1.0"}) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        html = resp.text
+    # 简单正文提取：去 script/style/标签，折叠空白
+    text = _re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html)
+    text = _re.sub(r"(?s)<[^>]+>", " ", text)
+    text = _re.sub(r"\s+", " ", text).strip()
+    if len(text) < 50:
+        raise ValueError(f"静态抓取内容过少（{len(text)} 字符），可能需要浏览器渲染")
+    return text[:4000]
+
+
+@tool
+async def fetch_rss_tool(feed_url: str) -> str:
+    """解析 RSS/Atom 订阅源，返回结构化条目（title/link/published/summary）。
+
+    目标为订阅源（feed/rss/.xml）时首选本工具，速度快且不耗浏览器。
+    """
+    extract = await fetch_rss(feed_url)
+    return json.dumps(extract.model_dump(), ensure_ascii=False)
+
+
+@tool
+async def fetch_static(url: str) -> str:
+    """抓取静态网页正文文本（轻量快速，不执行 JavaScript）。
+
+    页面依赖 JS 渲染或内容不足时，改用 collect_webpage。
+    """
+    return await _fetch_static_impl(url)
+
+
+@tool
+async def collect_webpage(url: str, instruction: str) -> str:
+    """采集动态/复杂网页（真实浏览器执行，约 20-60 秒）。"""
+    # 强制 web 路径（避免工具层二次特征路由，路由决策由 Agent 完成）
+    data = await run_collect(url, instruction, allow_internal=ALLOW_INTERNAL, source="web")
+    return json.dumps(data, ensure_ascii=False) if isinstance(data, dict) else str(data)
+
+
+def _llm() -> ChatOpenAI:
+    return ChatOpenAI(
+        model=settings.llm_model,
+        api_key=settings.openai_api_key,
+        base_url=settings.llm_base_url,
+        temperature=0,
+    )
 
 
 def _extract_url(task: str) -> str:
-    """从任务指令中提取 URL（支持 http(s):// 前缀或裸域名，自动补协议）。"""
+    """从任务指令中提取 URL（支持裸域名，自动补 https://）。"""
     m = URL_PATTERN.search(task)
     if not m:
         return ""
@@ -38,34 +108,38 @@ def _extract_url(task: str) -> str:
 
 
 async def collector_node(state: CollectorState) -> dict[str, Any]:
-    """执行一次网页采集；失败记录到产物（含 error 字段）并累加私有重试计数。
-
-    async 节点：直接 await 采集协程（避免在异步图内嵌套 asyncio.run 导致
-    事件循环冲突），失败转为产物字段而非向上抛。
-    """
+    """ReAct 多工具路由采集；结果归一进 raw_artifacts（含 source_type）。"""
     task = (state.get("task_requirement") or "").strip()
     url = state.get("url") or _extract_url(task)
     if not url:
         return {"raw_artifacts": [{"task": task, "error": "任务未提供 URL，无法采集"}]}
 
-    logger.info("Collector 采集: %s", url)
-    artifact: dict[str, Any] = {"task": task, "url": url}
+    # RSS 特征 → 系统提示词引导（LLM 仍可自主降级）
+    prompt = COLLECTOR_PROMPT
+    if looks_like_rss_url(url) or "订阅" in task or "feed" in task.lower():
+        prompt += "\n⚠️ 目标明显是 RSS/Atom 订阅源：必须首选 fetch_rss_tool。"
+
+    agent = create_react_agent(_llm(), tools=[fetch_rss_tool, fetch_static, collect_webpage],
+                               prompt=prompt)
     try:
-        data = await run_collect(url, task, allow_internal=ALLOW_INTERNAL)
-        if isinstance(data, dict):
-            artifact.update(data)
-        else:
-            artifact["data"] = str(data)
-    except Exception as exc:  # noqa: BLE001 — 采集失败转为产物字段
-        artifact["error"] = f"{type(exc).__name__}: {exc}"
+        result = await agent.ainvoke({"messages": [{"role": "user", "content": task}]})
+        answer = "".join(
+            (m.content or "") for m in result.get("messages", [])
+            if getattr(m, "type", "") == "ai" and not getattr(m, "tool_calls", None) and m.content
+        ) or "采集完成但未产出文本"
+        artifact: dict[str, Any] = {"task": task, "url": url, "data": answer[:8000]}
+    except Exception as exc:  # noqa: BLE001 — 采集失败转为产物字段（不打断主图）
+        artifact = {"task": task, "url": url, "error": f"{type(exc).__name__}: {exc}"[:500]}
+    artifact["source_type"] = "rss" if looks_like_rss_url(url) else "web"
     return {
         "raw_artifacts": [artifact],
         "retry_count": (state.get("retry_count") or 0) + 1,
+        "source_type": artifact["source_type"],
     }
 
 
 def build_collector_subgraph():
-    """构建 Collector 子图（私有状态 CollectorState，单节点）。"""
+    """构建 Collector 子图（私有状态 CollectorState，ReAct 多工具节点）。"""
     workflow = StateGraph(CollectorState)
     workflow.add_node("collect", collector_node)
     workflow.add_edge(START, "collect")

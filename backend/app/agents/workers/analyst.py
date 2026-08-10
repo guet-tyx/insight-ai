@@ -33,6 +33,8 @@ def _llm() -> ChatOpenAI:
         api_key=settings.openai_api_key,
         base_url=settings.llm_base_url,
         temperature=0.3,
+        max_retries=4,
+        request_timeout=120,
     )
 
 

@@ -20,12 +20,17 @@ async def start_collect(
     background_tasks: BackgroundTasks = BackgroundTasks(),
     _: User = Depends(get_current_user),
 ) -> CollectStartResponse:
-    """202 立即返回 task_id；结果通过 GET /collect/tasks/{task_id} 轮询。"""
+    """202 立即返回 task_id；结果通过 GET /collect/tasks/{task_id} 轮询。
+
+    source（W6）：auto（RSS 特征自动分流）/ rss（强制 RSS 解析）/ web（强制浏览器）。
+    """
     ok, err = validate_url(payload.url)
     if not ok:
         raise HTTPException(status_code=422, detail=err)
+    if payload.source not in ("auto", "rss", "web"):
+        raise HTTPException(status_code=422, detail="source 仅支持 auto/rss/web")
     # output_schema 合法性前置校验（避免任务进入后台才失败）
-    if payload.output_schema is not None:
+    if payload.output_schema is not None and payload.source != "rss":
         try:
             from app.services.collector_service import schema_to_pydantic
 
@@ -36,7 +41,7 @@ async def start_collect(
     task_id = task_store.create(payload.url)
     background_tasks.add_task(
         collect_task, task_id, payload.url, payload.instruction,
-        payload.output_schema, payload.max_steps,
+        payload.output_schema, payload.max_steps, payload.source,
     )
     return CollectStartResponse(task_id=task_id, url=payload.url)
 

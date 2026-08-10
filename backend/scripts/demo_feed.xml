@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+<title>Insight AI 情报速递（演示源）</title>
+<link>https://example.com/news</link>
+<item>
+  <title>LangGraph 发布多智能体增强版</title>
+  <link>https://example.com/news/1</link>
+  <pubDate>Mon, 10 Aug 2026 08:00:00 GMT</pubDate>
+  <description>新版增强子图状态隔离与检查点持久化能力。</description>
+</item>
+<item>
+  <title>MCP 协议生态持续扩大</title>
+  <link>https://example.com/news/2</link>
+  <pubDate>Sun, 09 Aug 2026 09:30:00 GMT</pubDate>
+  <description>主流 Agent 框架均已支持工具热插拔。</description>
+</item>
+<item>
+  <title>GraphRAG 命中率提升 22%</title>
+  <link>https://example.com/news/3</link>
+  <pubDate>Sat, 08 Aug 2026 10:00:00 GMT</pubDate>
+  <description>多路召回融合在复杂推理任务上表现优异。</description>
+</item>
+</channel></rss>

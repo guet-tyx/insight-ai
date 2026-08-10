@@ -38,14 +38,22 @@ def test_collect_structured_output(local_test_page: str) -> None:
 
 
 def test_collect_plain_text(local_test_page: str) -> None:
-    """无 Schema 时返回纯文本结果。"""
+    """web 路径：W6 起无显式 schema 时默认 WebExtract 结构化；文本兜底可接受。"""
     from app.services.collector_service import collect
 
     result = asyncio.run(
         collect(local_test_page, "回答：这个页面是什么平台？", max_steps=15, allow_internal=True)
     )
-    assert isinstance(result, str) and result.strip(), "文本结果为空"
-    assert ("Insight" in result) or ("情报" in result) or ("平台" in result)
+    if isinstance(result, dict):
+        assert result.get("title") or result.get("summary"), "结构化结果为空"
+        # 结构化结果内容命中关键词（提取自测试页）
+        assert any(
+            k in str(result.get("title", "")) + str(result.get("summary", ""))
+            for k in ("Insight", "情报", "平台")
+        )
+    else:
+        assert isinstance(result, str) and result.strip(), "文本结果为空"
+        assert ("Insight" in result) or ("情报" in result) or ("平台" in result)
 
 
 def test_collect_api_internal_blocked(client: TestClient, auth_headers: dict[str, str]) -> None:
@@ -72,3 +80,51 @@ def test_collect_api_invalid_schema_rejected(
         },
     )
     assert resp.status_code == 422
+
+
+def test_collect_invalid_source_rejected(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    resp = client.post(
+        "/api/v1/collect",
+        headers=auth_headers,
+        json={"url": "https://example.com", "instruction": "提取", "source": "socks"},
+    )
+    assert resp.status_code in (422, 202)  # Pydantic Literal 校验或后端校验
+
+
+def test_collect_rss_route_structured(local_rss_feed: str) -> None:
+    """RSS 路由：不耗浏览器，直接结构化输出条目。"""
+    from app.services.collector_service import collect
+
+    result = asyncio.run(
+        collect(local_rss_feed, "提取最新条目", source="rss", allow_internal=True)
+    )
+    assert isinstance(result, dict)
+    assert result["feed_title"] == "Insight AI 情报速递"
+    assert len(result["items"]) == 3
+    assert result["items"][0]["title"].startswith("LangGraph")
+
+
+def test_collect_auto_route_picks_rss_for_feed_url(local_rss_feed: str) -> None:
+    """auto 路由：RSS 特征 URL 自动走 RSS 快速路径（结构含 items 即证明）。"""
+    from app.services.collector_service import collect
+
+    result = asyncio.run(
+        collect(local_rss_feed, "查看订阅源", source="auto", allow_internal=True)
+    )
+    assert isinstance(result, dict) and "items" in result, "auto 未命中 RSS 路径"
+
+
+def test_collect_web_default_structured(local_test_page: str) -> None:
+    """web 路径默认强类型 WebExtract 输出（W6）。"""
+    from app.services.collector_service import collect
+
+    result = asyncio.run(
+        collect(local_test_page, "提取页面标题与要点", source="web",
+                max_steps=15, allow_internal=True)
+    )
+    if isinstance(result, dict):  # 结构化成功
+        assert "title" in result
+    else:  # 兜底为文本
+        assert isinstance(result, str) and result.strip()

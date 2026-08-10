@@ -67,6 +67,7 @@ def test_iteration_reducer_accumulates() -> None:
 # ---------- 集成：完整链路（真实 LLM + 浏览器） ----------
 
 @pytest.mark.skipif(not BROWSER_READY, reason="LLM Key 或 Chromium 未就绪")
+@pytest.mark.flaky(reruns=2, reruns_delay=5)  # 真实 LLM + 浏览器：限流/网络瞬态自动重试
 def test_full_supervisor_workflow() -> None:
     """指令 → Supervisor → Collector(浏览器) → Analyst → finish，产出带引用报告。"""
     from app.core.checkpointer import ensure_checkpointer, reset_checkpointer

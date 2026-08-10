@@ -135,16 +135,36 @@ async def collect(
     output_schema: dict[str, Any] | None = None,
     max_steps: int = 30,
     allow_internal: bool = False,
+    source: str = "auto",
 ) -> Any:
-    """执行一次采集；返回结构化数据（dict/列表）或文本。"""
+    """执行一次采集（W6 三路由）；返回结构化数据（dict/列表）或文本。
+
+    source：auto（RSS 特征识别）/ rss（强制 RSS 解析，不耗浏览器）/ web（强制浏览器）。
+    rss 路径默认输出 RssExtract（自定义 output_schema 仅对 web 路径生效）。
+    """
     ok, err = validate_url(url, allow_internal=allow_internal)
     if not ok:
         raise CollectorError(err)
+    if source not in ("auto", "rss", "web"):
+        raise CollectorError(f"未知 source: {source}")
 
+    # ---- RSS 快速路径（auto 特征命中或强制 rss）----
+    from app.services.rss_service import fetch_rss, looks_like_rss_url
+
+    if source == "rss" or (source == "auto" and looks_like_rss_url(url)):
+        extract = await fetch_rss(url)
+        return extract.model_dump()
+
+    # ---- Web（浏览器）路径 ----
     task = build_task_instruction(url, instruction)
     output_model = None
     if output_schema:
         output_model = schema_to_pydantic("CollectOutput", output_schema)
+    if output_model is None:
+        # W6：web 路径默认强类型输出（WebExtract），校验失败由引擎回退文本
+        from app.schemas.collect import WebExtract
+
+        output_model = WebExtract
 
     start = time.monotonic()
     result = await session_manager.execute_task(
@@ -162,10 +182,11 @@ async def collect(
 
 
 async def collect_task(task_id: str, url: str, instruction: str,
-                       output_schema: dict[str, Any] | None, max_steps: int) -> None:
+                       output_schema: dict[str, Any] | None, max_steps: int,
+                       source: str = "auto") -> None:
     """后台任务入口（FastAPI BackgroundTasks 调用）。"""
     try:
-        data = await collect(url, instruction, output_schema, max_steps)
+        data = await collect(url, instruction, output_schema, max_steps, source=source)
         task_store.finish(task_id, "ready", data=data)
     except Exception as exc:  # noqa: BLE001 — 后台任务统一转为 failed
         task_store.finish(task_id, "failed", error=f"{type(exc).__name__}: {exc}"[:500])

@@ -152,3 +152,52 @@ def local_test_page() -> str:
     yield url
     server.shutdown()
     server.server_close()
+
+
+@pytest.fixture()
+def local_rss_feed() -> str:
+    """线程内托管 RSS 2.0 提要（W6），返回 feed URL。"""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    RSS_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+<title>Insight AI 情报速递</title>
+<link>https://example.com/news</link>
+<item>
+  <title>LangGraph 发布多智能体增强版</title>
+  <link>https://example.com/news/1</link>
+  <pubDate>Mon, 10 Aug 2026 08:00:00 GMT</pubDate>
+  <description>新版增强子图状态隔离与检查点持久化能力。</description>
+</item>
+<item>
+  <title>MCP 协议生态持续扩大</title>
+  <link>https://example.com/news/2</link>
+  <pubDate>Sun, 09 Aug 2026 09:30:00 GMT</pubDate>
+  <description>主流 Agent 框架均已支持工具热插拔。</description>
+</item>
+<item>
+  <title>GraphRAG 命中率提升 22%</title>
+  <link>https://example.com/news/3</link>
+  <pubDate>Sat, 08 Aug 2026 10:00:00 GMT</pubDate>
+  <description>多路召回融合在复杂推理任务上表现优异。</description>
+</item>
+</channel></rss>"""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            self.send_response(200)
+            self.send_header("Content-Type", "application/rss+xml; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(RSS_XML.encode("utf-8"))
+
+        def log_message(self, *args):  # 静默日志
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_port}/feed.xml"
+    yield url
+    server.shutdown()
+    server.server_close()

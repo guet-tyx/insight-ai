@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     # ---- 浏览器采集（W3）----
     browser_proxy_list: str = ""  # 代理池，逗号分隔；空 = 直连（本机开发默认）
     collector_allow_internal: bool = False  # SSRF 防护；仅本地演示/测试时置 true
+    collector_max_proxy_retries: int = 2  # W6：连接类失败自动换代理重试轮数（0=关闭）
 
     app_name: str = "Insight AI"
     app_version: str = "0.1.0"

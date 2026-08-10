@@ -85,9 +85,9 @@ class BrowserSessionManager:
     def _get_session(self) -> Any:
         """获取（必要时创建）全局唯一的 BrowserSession。
 
-        反检测基线：随机 UA + 中文语言头 + 无沙箱参数 + 代理（若配置）。
-        事件循环变更时自动重建：playwright 连接绑定创建时的 loop，
-        跨循环复用（uvicorn --reload / 测试多循环）会导致『事件循环已关闭』。
+        反检测基线：随机 UA + 中文语言头 + 无沙箱参数 + 代理（若配置）
+        + 拟人化时序参数（W6：动作间延迟/最短加载时间/网络空闲等待）。
+        事件循环变更时自动重建：playwright 连接绑定创建时的 loop。
         """
         loop = asyncio.get_running_loop()
         if self._session is not None and self._session_loop_id != id(loop):
@@ -107,6 +107,9 @@ class BrowserSessionManager:
                     "User-Agent": random.choice(UA_POOL),
                     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
                 },
+                wait_between_actions=0.5,                       # 拟人：动作间延迟
+                minimum_wait_page_load_time=1.0,                # 拟人：页面加载等待
+                wait_for_network_idle_page_load_time=2.0,       # 拟人：网络空闲判定
             )
             self._session_loop_id = id(loop)
             logger.info("BrowserSession 已创建 (proxy=%s)", proxy or "直连")
@@ -139,15 +142,18 @@ class BrowserSessionManager:
     ) -> _StructuredOut | str:
         """执行自然语言采集任务；可选 Pydantic 模型做强类型结构化输出。
 
-        外层指数退避重试（1s/2s/4s）兜底浏览器/导航类瞬时故障；
-        重试耗尽抛 CollectorError。
+        重试策略（叠加）：
+        1. 指数退避（1s/2s/4s）重试瞬时故障（max_attempts）
+        2. W6 新增：连接/超时类失败自动**换代理重建会话**重试
+           （collector_max_proxy_retries 轮，0=关闭；需配置代理池）
         """
         Agent, _ = _load_browser_use()
-        session = self._get_session()
         llm = self.build_llm()
         last_exc: Exception | None = None
+        proxy_retries = 0
 
         for attempt in range(1, max_attempts + 1):
+            session = self._get_session()
             try:
                 agent = Agent(
                     task=task_instruction,
@@ -179,10 +185,33 @@ class BrowserSessionManager:
             except Exception as exc:  # noqa: BLE001 — 浏览器/驱动异常统一重试
                 last_exc = exc
                 logger.warning("采集任务第 %d 次失败：%s", attempt, exc)
+
+            # W6：连接/超时类失败 → 换代理重建会话（抗封禁；需代理池非空且配额未用尽）
+            if (
+                self.proxy_list
+                and proxy_retries < settings.collector_max_proxy_retries
+                and _is_connection_error(last_exc)
+            ):
+                proxy_retries += 1
+                proxy = self._next_proxy()
+                logger.warning("连接类失败，第 %d 次换代理 %s 重试", proxy_retries, proxy)
+                self._session = None  # 强制按新代理重建会话
+                await asyncio.sleep(1)
+                continue
             if attempt < max_attempts:
                 await asyncio.sleep(2 ** (attempt - 1))
 
         raise CollectorError(f"采集失败（已重试 {max_attempts} 次）: {last_exc}")
+
+
+def _is_connection_error(exc: Exception | None) -> bool:
+    """判断异常是否属于连接/网络类（触发换代理重试）。"""
+    if exc is None:
+        return False
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, ConnectionError)):
+        return True
+    text = str(exc).lower()
+    return any(k in text for k in ("connect", "timeout", "dns", "proxy", "refused", "closed pipe"))
 
 
 session_manager = BrowserSessionManager()
