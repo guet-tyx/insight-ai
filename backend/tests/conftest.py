@@ -90,3 +90,62 @@ HAS_LLM_KEY = bool(settings.openai_api_key)
 INFRA_READY = MILVUS_UP and HAS_EMBED_KEY and HAS_LLM_KEY
 
 # 供测试模块使用：pytestmark = pytest.mark.skipif(not INFRA_READY, ...)
+
+
+# ---- 浏览器采集集成测试探测：LLM Key + Chromium 可启动 ----
+def _browser_ready() -> bool:
+    if not HAS_LLM_KEY:
+        return False
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            browser.close()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+BROWSER_READY = _browser_ready()
+
+
+@pytest.fixture()
+def local_test_page() -> str:
+    """线程内启动本地测试页（http.server），返回可直接采集的 URL。
+
+    页面包含标题 / h1 / 无序列表 / 表格，供自然语言采集指令验证。
+    """
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    HTML = """<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>Insight AI 测试采集页</title></head>
+<body>
+<h1>Insight AI 开源情报分析平台</h1>
+<ul>
+<li>LangGraph 多智能体编排</li>
+<li>Milvus 向量检索</li>
+<li>Neo4j 图查询</li>
+</ul>
+<table><tr><th>模型</th><th>维度</th></tr><tr><td>bge-m3</td><td>1024</td></tr></table>
+<p>本项目基于 MCP 架构实现工具服务化。</p>
+</body></html>"""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(HTML.encode("utf-8"))
+
+        def log_message(self, *args):  # 静默日志
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_port}/"
+    yield url
+    server.shutdown()
+    server.server_close()

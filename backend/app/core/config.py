@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-m3"
     embedding_dim: int = 1024
 
+    # ---- 浏览器采集（W3）----
+    browser_proxy_list: str = ""  # 代理池，逗号分隔；空 = 直连（本机开发默认）
+
     app_name: str = "Insight AI"
     app_version: str = "0.1.0"
 
