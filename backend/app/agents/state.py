@@ -25,6 +25,8 @@ class GlobalState(TypedDict):
     task_requirement: str
     # 采集阶段产出（Collector → GlobalState）
     raw_artifacts: Annotated[list[dict[str, Any]], operator.add]
+    # 语义分块产出（Research → GlobalState，供 Analyst 引用真实内容）
+    semantic_chunks: Annotated[list[dict[str, Any]], operator.add]
     # 研究阶段产出：实体/关系缓存（Research，W7 图谱补全）
     extracted_entities: Annotated[list[dict[str, Any]], operator.add]
     # 最终情报分析报告（Analyst 产出，Markdown）
@@ -60,6 +62,7 @@ class AnalystState(TypedDict):
     """Analyst 子图私有状态：报告草稿（私有中间产物）。"""
 
     raw_artifacts: list[dict[str, Any]]
+    semantic_chunks: list[dict[str, Any]]  # W8 修复：Research 真实内容注入
     extracted_entities: list[dict[str, Any]]
     human_feedback: str = ""  # W8：HITL 修改意见（由父图映射注入）
     final_report: str

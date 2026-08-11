@@ -40,15 +40,23 @@ def _llm() -> ChatOpenAI:
 
 def analyst_node(state: AnalystState) -> dict[str, Any]:
     artifacts = state.get("raw_artifacts") or []
+    chunks = state.get("semantic_chunks") or []  # W8 修复：Research 真实内容
     entities = state.get("extracted_entities") or []
-    if not artifacts and not entities:
+    if not artifacts and not chunks and not entities:
         return {"final_report": "## 结论\n\n当前没有可用素材，无法生成分析报告。"}
 
     material = []
     for i, a in enumerate(artifacts, start=1):
         material.append(f"[{i}] 采集产物：{a}")
-    for j, e in enumerate(entities, start=len(artifacts) + 1):
-        material.append(f"[{j}] 研究片段：{e}")
+    for j, c in enumerate(chunks, start=len(artifacts) + 1):
+        # 语义分块携带真实检索内容与溯源（得分/来源类型）
+        material.append(
+            f"[{j}] 知识片段（{c.get('source_type', 'vector')} · 文档 {str(c.get('doc_id', ''))[:8]}"
+            f"{' · 第 ' + str(c.get('page')) + ' 页' if c.get('page') else ''}"
+            f"{' · 标题「' + str(c.get('header')) + '」' if c.get('header') else ''}）：{c.get('text', '')}"
+        )
+    for k, e in enumerate(entities, start=len(artifacts) + len(chunks) + 1):
+        material.append(f"[{k}] 研究片段：{e}")
 
     # W8：HITL 修改意见注入（修订轮次针对性调整，不推翻重写）
     feedback = (state.get("human_feedback") or "").strip()
@@ -69,7 +77,8 @@ def analyst_node(state: AnalystState) -> dict[str, Any]:
         ]
     )
     report = str(resp.content)
-    logger.info("Analyst 报告生成：%d 字（修订反馈=%s）", len(report), bool(feedback))
+    logger.info("Analyst 报告生成：%d 字（素材 %d 采集/%d 片段/%d 实体）",
+                len(report), len(artifacts), len(chunks), len(entities))
     return {"final_report": report}
 
 

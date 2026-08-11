@@ -30,9 +30,10 @@ _graph = None
 
 
 def _subgraph_mapper(sub_state: dict[str, Any], parent: dict[str, Any]) -> dict[str, Any]:
-    """父图 → 子图：注入全局任务指令 + HITL 修改意见（按需裁剪字段）。"""
+    """父图 → 子图：注入全局任务指令 + Research 语义分块 + HITL 修改意见。"""
     return {
         "task_requirement": (parent or {}).get("task_requirement", ""),
+        "semantic_chunks": (parent or {}).get("semantic_chunks", []),
         "human_feedback": (parent or {}).get("human_feedback", ""),
     }
 
@@ -92,6 +93,7 @@ def start_run(instruction: str, thread_id: str) -> dict:
             "task_requirement": instruction,
             "next_node": "",
             "raw_artifacts": [],
+            "semantic_chunks": [],
             "extracted_entities": [],
             "final_report": "",
             "human_feedback": "",

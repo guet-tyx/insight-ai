@@ -143,6 +143,7 @@ def _run_inputs(instruction: str) -> dict[str, Any]:
         "task_requirement": instruction,
         "next_node": "",
         "raw_artifacts": [],
+        "semantic_chunks": [],
         "extracted_entities": [],
         "final_report": "",
         "human_feedback": "",
