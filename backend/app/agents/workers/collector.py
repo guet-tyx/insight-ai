@@ -40,19 +40,32 @@ COLLECTOR_PROMPT = """你是数据采集专家（Collector Agent）。根据任�
 3. collect_webpage：动态渲染/复杂网页，或 fetch_static 内容不足时使用；约需 20-60 秒。
 
 规则：优先低成本工具；一个工具失败或内容不足时换下一个（自动降级）；
+⚠️ 若 fetch_static 返回"反爬拦截/安全验证/401/403/429"错误，**必须立即改用
+collect_webpage（真实浏览器）重试**，不要放弃采集；
 若任务未给出 URL，直接说明缺失信息。结果保持事实，不要编造。"""
 
 
 async def _fetch_static_impl(url: str) -> str:
-    """静态页抓取：httpx 拉取，去标签保留正文文本。"""
+    """静态页抓取：httpx 拉取，去标签保留正文文本。
+
+    反爬识别：403/4xx 或验证页特征 → 抛出明确信号，促使 LLM 回退浏览器。
+    """
     import httpx
     import re as _re
 
     async with httpx.AsyncClient(timeout=20, follow_redirects=True,
                                  headers={"User-Agent": "Mozilla/5.0 InsightAI/1.0"}) as client:
         resp = await client.get(url)
+        if resp.status_code in (401, 403, 429) or resp.status_code >= 500:
+            raise ValueError(
+                f"静态抓取被目标站点反爬拦截（HTTP {resp.status_code}），"
+                "该站点需要真实浏览器渲染/通过反爬：请改用 collect_webpage 工具"
+            )
         resp.raise_for_status()
         html = resp.text
+    # 验证页特征：极短页面且含验证关键词
+    if len(html) < 200 and ("验证" in html or "captcha" in html.lower() or "安全验证" in html):
+        raise ValueError("命中站点安全验证页，请改用 collect_webpage 浏览器采集")
     # 简单正文提取：去 script/style/标签，折叠空白
     text = _re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html)
     text = _re.sub(r"(?s)<[^>]+>", " ", text)
@@ -121,15 +134,34 @@ async def collector_node(state: CollectorState) -> dict[str, Any]:
 
     agent = create_react_agent(_llm(), tools=[fetch_rss_tool, fetch_static, collect_webpage],
                                prompt=prompt)
+    artifact: dict[str, Any] = {"task": task, "url": url}
     try:
         result = await agent.ainvoke({"messages": [{"role": "user", "content": task}]})
         answer = "".join(
             (m.content or "") for m in result.get("messages", [])
             if getattr(m, "type", "") == "ai" and not getattr(m, "tool_calls", None) and m.content
         ) or "采集完成但未产出文本"
-        artifact: dict[str, Any] = {"task": task, "url": url, "data": answer[:8000]}
+        artifact["data"] = answer[:8000]
+        # 规则兜底：LLM 路由结果疑似反爬失败 → 强制浏览器补偿采集一次
+        if any(k in answer for k in ("反爬", "403", "429", "安全验证", "无法访问", "HTTPStatusError")):
+            logger.warning("ReAct 路由疑似反爬失败，强制浏览器补偿采集：%s", url)
+            fallback = await run_collect(url, task, allow_internal=ALLOW_INTERNAL, source="web")
+            artifact["data"] = (
+                json.dumps(fallback, ensure_ascii=False) if isinstance(fallback, dict) else str(fallback)
+            )[:8000]
+            artifact["fallback"] = "browser"
     except Exception as exc:  # noqa: BLE001 — 采集失败转为产物字段（不打断主图）
-        artifact = {"task": task, "url": url, "error": f"{type(exc).__name__}: {exc}"[:500]}
+        artifact["error"] = f"{type(exc).__name__}: {exc}"[:500]
+        # 异常兜底：LLM 链路整体失败时也尝试浏览器补偿
+        try:
+            fallback = await run_collect(url, task, allow_internal=ALLOW_INTERNAL, source="web")
+            artifact["data"] = (
+                json.dumps(fallback, ensure_ascii=False) if isinstance(fallback, dict) else str(fallback)
+            )[:8000]
+            artifact["fallback"] = "browser"
+            artifact.pop("error", None)
+        except Exception as exc2:  # noqa: BLE001
+            artifact["error"] = f"{type(exc).__name__}: {exc}"[:500]
     artifact["source_type"] = "rss" if looks_like_rss_url(url) else "web"
     return {
         "raw_artifacts": [artifact],
