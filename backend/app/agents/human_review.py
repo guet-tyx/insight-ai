@@ -7,6 +7,7 @@
 
 修订熔断（MAX_REVIEWS）：超限自动 approve，防无限修订循环。
 """
+
 from __future__ import annotations
 
 import logging
@@ -43,10 +44,12 @@ def human_review(state: GlobalState) -> dict[str, Any]:
             "review_count": 1,
         }
 
-    feedback: Any = interrupt({
-        "draft": state.get("final_report", ""),
-        "stage": "report_review",
-    })
+    feedback: Any = interrupt(
+        {
+            "draft": state.get("final_report", ""),
+            "stage": "report_review",
+        }
+    )
     action = "approve"
     comment = ""
     if isinstance(feedback, dict):

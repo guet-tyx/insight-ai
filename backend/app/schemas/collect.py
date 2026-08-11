@@ -1,4 +1,5 @@
 """采集相关 Pydantic Schema（含 W6 预置领域输出 Schema）。"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -8,7 +9,9 @@ from pydantic import BaseModel, Field
 
 
 class CollectRequest(BaseModel):
-    url: str = Field(min_length=5, max_length=2048, description="目标 URL（http/https，支持 RSS feed）")
+    url: str = Field(
+        min_length=5, max_length=2048, description="目标 URL（http/https，支持 RSS feed）"
+    )
     instruction: str = Field(min_length=1, max_length=2000, description="自然语言提取指令")
     source: str = Field(
         default="auto",
@@ -37,6 +40,7 @@ class CollectTaskOut(BaseModel):
 
 
 # ---------- W6：预置领域输出 Schema ----------
+
 
 class RssItem(BaseModel):
     """RSS/Atom 条目（规范化输出）。"""

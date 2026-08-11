@@ -1,0 +1,29 @@
+# 排除构建产物/敏感文件进 Docker 构建上下文（W11 镜像瘦身）
+# 构建上下文为仓库根，backend/frontend/mcp_servers 均需排除各自产物
+
+# 通用缓存与产物
+**/__pycache__
+**/.pytest_cache
+**/.coverage
+**/*.log
+**/.DS_Store
+
+# 后端
+backend/.venv
+backend/data
+backend/insightai.db
+backend/w10_*.log
+backend/w11_*.log
+
+# 前端
+frontend/node_modules
+frontend/.next
+frontend/.pnpm-store
+
+# 测试与运行时截图
+gui-test-screenshots
+
+# 敏感配置（Docker 部署用 env_file/环境变量注入，不入镜像）
+.env
+.env.*
+!*.example

@@ -4,6 +4,7 @@
 子图输出：final_report（Markdown，含 [N] 引用编号，映射进 GlobalState）
 W8 增强：报告生成后进入 HITL 审核卡点（interrupt）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -93,8 +94,13 @@ def analyst_node(state: AnalystState) -> dict[str, Any]:
     if not guard["valid"]:
         trace.record("guardrail", {"kind": "citation_oob", "detail": guard})
         logger.warning("Analyst 引用校验告警：%s", guard["warnings"])
-    logger.info("Analyst 报告生成：%d 字（素材 %d 采集/%d 片段/%d 实体）",
-                len(report), len(artifacts), len(chunks), len(entities))
+    logger.info(
+        "Analyst 报告生成：%d 字（素材 %d 采集/%d 片段/%d 实体）",
+        len(report),
+        len(artifacts),
+        len(chunks),
+        len(entities),
+    )
     return {"final_report": report}
 
 

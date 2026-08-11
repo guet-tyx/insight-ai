@@ -3,6 +3,7 @@
 采集任务为瞬时状态（无需持久化），使用线程安全的内存任务表；
 生产环境（W11）替换为 Celery/Redis 队列。
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -10,7 +11,7 @@ import logging
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -60,8 +61,10 @@ class _CollectStore:
         task_id = uuid.uuid4().hex
         with self._lock:
             self._tasks[task_id] = CollectTaskOut(
-                task_id=task_id, url=url, status="running",
-                created_at=datetime.now(timezone.utc),
+                task_id=task_id,
+                url=url,
+                status="running",
+                created_at=datetime.now(UTC),
             )
         return task_id
 
@@ -117,7 +120,7 @@ def schema_to_pydantic(name: str, schema: dict[str, Any]) -> type[BaseModel]:
     required = set(schema.get("required", []) or [])
     for field_name, prop in properties.items():
         if not isinstance(prop, dict):
-            raise ValueError(f"字段 {field_name} 定义必须是对象")
+            raise TypeError(f"字段 {field_name} 定义必须是对象")
         py_type = _SCHEMA_TYPE_MAP.get(prop.get("type", "string"), str)
         default = None if field_name not in required else PydanticUndefined
         fields[field_name] = (py_type, default)
@@ -178,7 +181,7 @@ async def collect(
             if source == "tls":
                 raise
             logger.info("TLS 抓取不可用，转浏览器采集：%s", url)
-        except Exception as exc:  # noqa: BLE001 — 网络类失败转浏览器
+        except Exception as exc:
             logger.warning("TLS 抓取异常（%s），转浏览器", exc)
             if source == "tls":
                 raise CollectorError(f"TLS 抓取失败：{exc}") from exc
@@ -219,16 +222,23 @@ def _captcha_record(url: str) -> str:
 
     digest = hashlib.md5(url.encode("utf-8")).hexdigest()[:8]
     stamp = _t.strftime("%Y%m%d_%H%M%S")
-    return str(Path(__file__).resolve().parent.parent.parent / "data" / "captcha" / f"{stamp}_{digest}.png")
+    return str(
+        Path(__file__).resolve().parent.parent.parent / "data" / "captcha" / f"{stamp}_{digest}.png"
+    )
 
 
-async def collect_task(task_id: str, url: str, instruction: str,
-                       output_schema: dict[str, Any] | None, max_steps: int,
-                       source: str = "auto") -> None:
+async def collect_task(
+    task_id: str,
+    url: str,
+    instruction: str,
+    output_schema: dict[str, Any] | None,
+    max_steps: int,
+    source: str = "auto",
+) -> None:
     """后台任务入口（FastAPI BackgroundTasks 调用）。"""
     try:
         data = await collect(url, instruction, output_schema, max_steps, source=source)
         task_store.finish(task_id, "ready", data=data)
-    except Exception as exc:  # noqa: BLE001 — 后台任务统一转为 failed
+    except Exception as exc:
         task_store.finish(task_id, "failed", error=f"{type(exc).__name__}: {exc}"[:500])
-        logger.error("采集任务 %s 失败：%s", task_id, exc, exc_info=True)
+        logger.exception("采集任务 %s 失败", task_id)

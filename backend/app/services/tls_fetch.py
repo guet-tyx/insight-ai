@@ -12,6 +12,7 @@ curl_cffi 基于 curl-impersonate，复刻 Chromium BoringSSL 握手行为与 HT
 - ⚠️ Windows + 非 ASCII 项目路径：CA 文件必须放在纯 ASCII 路径
   （libcurl 对含中文路径的 CAfile 加载失败，实测 curl(77)）
 """
+
 from __future__ import annotations
 
 import logging

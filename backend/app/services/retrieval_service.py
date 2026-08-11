@@ -3,6 +3,7 @@
 W7 升级：search() 内部从「纯向量」升级为「hybrid 双路 + RRF」；
 图查询失败/空库自动退化为纯向量（兼容 W2 行为）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -46,7 +47,9 @@ def _embed_query(query: str) -> list[float]:
     return emb.embed_query(query)
 
 
-def _vector_search(query: str, top_k: int = VECTOR_RECALL_K) -> list[tuple[str, str, float, int, str]]:
+def _vector_search(
+    query: str, top_k: int = VECTOR_RECALL_K
+) -> list[tuple[str, str, float, int, str]]:
     """Milvus 向量召回 → (doc_id, text, distance, page, header) 列表（供 RRF）。"""
     ensure_collection()
     mc: MilvusClient = get_milvus_client()
@@ -70,7 +73,7 @@ def _graph_search(query: str) -> list[tuple[str, str, float]]:
         from app.services.graph_service import graph_search
 
         paths = graph_search(query, max_hops=2)
-    except Exception as exc:  # noqa: BLE001 — 图查询失败退化为纯向量
+    except Exception as exc:
         logger.warning("图谱查询失败，退化纯向量：%s", exc)
         return []
     return [(p["doc_id"], p["text"], p["score"]) for p in paths]

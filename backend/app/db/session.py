@@ -2,6 +2,7 @@
 
 后续周次可无缝切换 Postgres：仅修改 Settings.database_url。
 """
+
 from __future__ import annotations
 
 from collections.abc import Generator

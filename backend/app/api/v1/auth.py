@@ -1,4 +1,5 @@
 """认证路由：注册 / 登录（OAuth2 密码流）/ 当前用户。"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -29,7 +30,9 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> User:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)) -> TokenResponse:
+def login(
+    form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
+) -> TokenResponse:
     """OAuth2 密码流登录：表单 username/password，成功返回 access_token + 用户信息。"""
     user = db.scalar(select(User).where(User.username == form.username))
     if user is None or not verify_password(form.password, user.hashed_password):
@@ -38,7 +41,9 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
             detail="用户名或密码错误",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return TokenResponse(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
+    return TokenResponse(
+        access_token=create_access_token(user.id), user=UserOut.model_validate(user)
+    )
 
 
 @router.get("/me", response_model=UserOut)

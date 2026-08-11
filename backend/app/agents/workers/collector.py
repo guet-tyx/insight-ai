@@ -10,6 +10,7 @@ LLM（ReAct）决策 + 系统提示词引导 RSS 特征优先；工具失败自�
 私有状态（CollectorState）：task_requirement / url / raw_artifacts /
 retry_count / browser_payload / source_type —— 不进入父图 checkpoint。
 """
+
 from __future__ import annotations
 
 import json
@@ -51,7 +52,6 @@ async def _fetch_static_impl(url: str) -> str:
     反爬识别：403/4xx 或验证页特征 → 抛出明确信号，促使 LLM 回退浏览器。
     同域请求经 polite_wait 节流（礼貌采集）。
     """
-    import re as _re
 
     from app.services.anti_bot import polite_wait
     from app.services.tls_fetch import tls_fetch
@@ -130,35 +130,48 @@ async def collector_node(state: CollectorState) -> dict[str, Any]:
     if looks_like_rss_url(url) or "订阅" in task or "feed" in task.lower():
         prompt += "\n⚠️ 目标明显是 RSS/Atom 订阅源：必须首选 fetch_rss_tool。"
 
-    agent = create_react_agent(_llm(), tools=[fetch_rss_tool, fetch_static, collect_webpage],
-                               prompt=prompt)
+    agent = create_react_agent(
+        _llm(), tools=[fetch_rss_tool, fetch_static, collect_webpage], prompt=prompt
+    )
     artifact: dict[str, Any] = {"task": task, "url": url}
     try:
         result = await agent.ainvoke({"messages": [{"role": "user", "content": task}]})
-        answer = "".join(
-            (m.content or "") for m in result.get("messages", [])
-            if getattr(m, "type", "") == "ai" and not getattr(m, "tool_calls", None) and m.content
-        ) or "采集完成但未产出文本"
+        answer = (
+            "".join(
+                (m.content or "")
+                for m in result.get("messages", [])
+                if getattr(m, "type", "") == "ai"
+                and not getattr(m, "tool_calls", None)
+                and m.content
+            )
+            or "采集完成但未产出文本"
+        )
         artifact["data"] = answer[:8000]
         # 规则兜底：LLM 路由结果疑似反爬失败 → 强制浏览器补偿采集一次
-        if any(k in answer for k in ("反爬", "403", "429", "安全验证", "无法访问", "HTTPStatusError")):
+        if any(
+            k in answer for k in ("反爬", "403", "429", "安全验证", "无法访问", "HTTPStatusError")
+        ):
             logger.warning("ReAct 路由疑似反爬失败，强制浏览器补偿采集：%s", url)
             fallback = await run_collect(url, task, allow_internal=ALLOW_INTERNAL, source="web")
             artifact["data"] = (
-                json.dumps(fallback, ensure_ascii=False) if isinstance(fallback, dict) else str(fallback)
+                json.dumps(fallback, ensure_ascii=False)
+                if isinstance(fallback, dict)
+                else str(fallback)
             )[:8000]
             artifact["fallback"] = "browser"
-    except Exception as exc:  # noqa: BLE001 — 采集失败转为产物字段（不打断主图）
+    except Exception as exc:
         artifact["error"] = f"{type(exc).__name__}: {exc}"[:500]
         # 异常兜底：LLM 链路整体失败时也尝试浏览器补偿
         try:
             fallback = await run_collect(url, task, allow_internal=ALLOW_INTERNAL, source="web")
             artifact["data"] = (
-                json.dumps(fallback, ensure_ascii=False) if isinstance(fallback, dict) else str(fallback)
+                json.dumps(fallback, ensure_ascii=False)
+                if isinstance(fallback, dict)
+                else str(fallback)
             )[:8000]
             artifact["fallback"] = "browser"
             artifact.pop("error", None)
-        except Exception as exc2:  # noqa: BLE001
+        except Exception:
             artifact["error"] = f"{type(exc).__name__}: {exc}"[:500]
     artifact["source_type"] = "rss" if looks_like_rss_url(url) else "web"
     return {

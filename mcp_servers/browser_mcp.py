@@ -11,9 +11,9 @@
 
 启动：cd backend && uv run python ../mcp_servers/browser_mcp.py
 """
+
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
 import time
@@ -22,12 +22,12 @@ from pathlib import Path
 # 复用 backend 包
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
-from fastmcp import FastMCP  # noqa: E402
+from fastmcp import FastMCP
 
-from app.core.browser_agent import CollectorError  # noqa: E402
-from app.services.collector_service import collect as run_collect  # noqa: E402
-from app.services.rss_service import fetch_rss as run_fetch_rss  # noqa: E402
-from app.services.tls_fetch import tls_fetch  # noqa: E402
+from app.core.browser_agent import CollectorError
+from app.services.collector_service import collect as run_collect
+from app.services.rss_service import fetch_rss as run_fetch_rss
+from app.services.tls_fetch import tls_fetch
 
 mcp = FastMCP(
     name="BrowserMCP",
@@ -51,7 +51,7 @@ async def collect_webpage(url: str, instruction: str, max_steps: int = 20) -> di
         return data if isinstance(data, dict) else {"url": url, "data": str(data)}
     except CollectorError as exc:
         return {"url": url, "error": str(exc)}
-    except Exception as exc:  # noqa: BLE001 — MCP 工具应返回错误信息而非抛断连接
+    except Exception as exc:
         return {"url": url, "error": f"{type(exc).__name__}: {exc}"}
 
 
@@ -66,7 +66,7 @@ async def fetch_static(url: str) -> dict:
         if result.status_code in (401, 403, 429) or result.status_code >= 500:
             return {"url": url, "error": f"被目标站点拦截（HTTP {result.status_code}）"}
         return {"url": url, "text": result.text[:8000], "status_code": result.status_code}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"url": url, "error": f"{type(exc).__name__}: {exc}"}
 
 
@@ -76,7 +76,7 @@ async def fetch_rss(feed_url: str) -> dict:
     try:
         extract = await run_fetch_rss(feed_url)
         return extract.model_dump()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"error": f"{type(exc).__name__}: {exc}"}
 
 
@@ -85,17 +85,26 @@ def browser_health() -> str:
     """浏览器采集服务的运行状态（只读）。"""
     from app.core.stealth_browser import stealth_manager
 
-    return json.dumps({
-        "service": "BrowserMCP",
-        "uptime_seconds": int(time.time() - _started_at),
-        "stealth_cdp": bool(stealth_manager.cdp_url),
-        "profile_mode": stealth_manager.profile_mode,
-    }, ensure_ascii=False)
+    return json.dumps(
+        {
+            "service": "BrowserMCP",
+            "uptime_seconds": int(time.time() - _started_at),
+            "stealth_cdp": bool(stealth_manager.cdp_url),
+            "profile_mode": stealth_manager.profile_mode,
+        },
+        ensure_ascii=False,
+    )
 
 
 if __name__ == "__main__":
-    # 端口解析：uv run python ../mcp_servers/xxx_mcp.py --port 8101
+    # 端口/监听地址解析：uv run python ../mcp_servers/xxx_mcp.py --port 8101 [--host 0.0.0.0]
+    # 本机默认 127.0.0.1（安全）；Docker 容器内需 --host 0.0.0.0 供其它容器经服务名访问
     _port = 8000
+    _host = "127.0.0.1"
     if "--port" in sys.argv:
         _port = int(sys.argv[sys.argv.index("--port") + 1])
-    mcp.run(transport="http", host="127.0.0.1", port=_port)  # Streamable HTTP（默认 8000；可 --port 指定）
+    if "--host" in sys.argv:
+        _host = sys.argv[sys.argv.index("--host") + 1]
+    mcp.run(
+        transport="http", host=_host, port=_port
+    )  # Streamable HTTP（默认 8000；可 --port 指定）

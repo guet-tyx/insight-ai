@@ -8,6 +8,7 @@
               └──────────────────── 循环回 supervisor ┘ └ ┘
 Supervisor 不持有工具（Handoff 语义），仅路由；循环由 iteration Reducer 熔断。
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,7 +19,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents.human_review import after_review, human_review
 from app.agents.state import GlobalState
-from app.agents.supervisor import supervise, should_continue
+from app.agents.supervisor import should_continue, supervise
 from app.agents.workers.analyst import build_analyst_subgraph
 from app.agents.workers.collector import build_collector_subgraph
 from app.agents.workers.research import build_research_subgraph

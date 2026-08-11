@@ -4,6 +4,7 @@
 - 查询：LLM 提取查询核心实体 → 全文索引定位 → 1-2 跳路径 → 自然语言段落
 - 空图/未命中返回 []（上游 RRF 自动退化为纯向量）
 """
+
 from __future__ import annotations
 
 import logging
@@ -14,7 +15,7 @@ from typing import Any
 from neo4j import GraphDatabase
 
 from app.core.config import settings
-from app.services.entity_extraction import NODE_TYPES, REL_TYPES, EntityExtraction
+from app.services.entity_extraction import REL_TYPES, EntityExtraction
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def ensure_graph_schema() -> None:
                 "CREATE FULLTEXT INDEX graph_entity_names IF NOT EXISTS "
                 "FOR (n:Entity) ON EACH [n.name]"
             )
-        except Exception as exc:  # noqa: BLE001 — 旧版本语法差异不阻断
+        except Exception as exc:
             logger.warning("全文索引创建失败（不影响基础查询）：%s", exc)
 
 
@@ -80,7 +81,8 @@ def write_triples(doc_id: str, extraction: EntityExtraction) -> tuple[int, int]:
         return 0, 0
     names = {e.name for e in extraction.entities}
     rels = [
-        r for r in extraction.relations
+        r
+        for r in extraction.relations
         if r.source in names and r.target in names and r.type in REL_TYPES
     ]
     with get_driver().session() as s:
@@ -91,8 +93,7 @@ def write_triples(doc_id: str, extraction: EntityExtraction) -> tuple[int, int]:
                 "SET n.type = row.type, "
                 "n.doc_id = coalesce(n.doc_id, row.doc_id)",  # 保留首发来源
                 rows=[
-                    {"name": e.name, "type": e.type, "doc_id": doc_id}
-                    for e in extraction.entities
+                    {"name": e.name, "type": e.type, "doc_id": doc_id} for e in extraction.entities
                 ],
             )
         if rels:
@@ -103,8 +104,11 @@ def write_triples(doc_id: str, extraction: EntityExtraction) -> tuple[int, int]:
                 "SET r.doc_id = coalesce(r.doc_id, row.doc_id), r.evidence = row.evidence",
                 rows=[
                     {
-                        "source": r.source, "target": r.target,
-                        "type": r.type, "doc_id": doc_id, "evidence": r.evidence,
+                        "source": r.source,
+                        "target": r.target,
+                        "type": r.type,
+                        "doc_id": doc_id,
+                        "evidence": r.evidence,
                     }
                     for r in rels
                 ],
@@ -136,15 +140,18 @@ def _extract_query_entities(query: str) -> list[str]:
     )
     resp = llm.invoke(
         [
-            SystemMessage(content="从用户查询中提取专有名词实体（公司名/技术名/人名/事件名/产品名）。"
-                                  "不提取泛指词如：平台、报告、白皮书、系统、技术。"
-                                  "每行输出一个实体名，不要任何标点；没有则输出「无」。"),
+            SystemMessage(
+                content="从用户查询中提取专有名词实体（公司名/技术名/人名/事件名/产品名）。"
+                "不提取泛指词如：平台、报告、白皮书、系统、技术。"
+                "每行输出一个实体名，不要任何标点；没有则输出「无」。"
+            ),
             HumanMessage(content=query),
         ]
     )
     # 兼容中英文逗号/顿号/换行分隔（lite 模型偶尔混用中文标点）
     names = [
-        n.strip() for n in re.split(r"[,，、;；\n]+", str(resp.content))
+        n.strip()
+        for n in re.split(r"[,，、;；\n]+", str(resp.content))
         if n.strip() and n.strip() != "无"
     ]
     _extract_cache[query] = (now, names)
@@ -192,12 +199,14 @@ def graph_search(query: str, max_hops: int = 2) -> list[dict[str, Any]]:
             segs.append(f"{prev}--[{rel_type}]-->{node.get('name')}")
             prev = node.get("name", "")
         text = " 且 ".join(segs)
-        texts.append({
-            "text": text,
-            "doc_id": nodes[0].get("doc_id", "") or nodes[-1].get("doc_id", ""),
-            "score": 1.0 / (hops + 1),  # 跳数越少相关度越高（融合排名用）
-            "path": segs,
-        })
+        texts.append(
+            {
+                "text": text,
+                "doc_id": nodes[0].get("doc_id", "") or nodes[-1].get("doc_id", ""),
+                "score": 1.0 / (hops + 1),  # 跳数越少相关度越高（融合排名用）
+                "path": segs,
+            }
+        )
     logger.info("图谱查询命中 %d 条路径（查询=%s）", len(texts), query[:40])
     return texts
 
@@ -221,7 +230,9 @@ def _parse_path(path) -> tuple[list[dict], list[str]]:
     # Path 对象兼容
     rels = getattr(path, "relationships", [])
     nodes = getattr(path, "nodes", [])
-    return list(nodes), [r.get("type", "") if isinstance(r, dict) else getattr(r, "type", "") for r in rels]
+    return list(nodes), [
+        r.get("type", "") if isinstance(r, dict) else getattr(r, "type", "") for r in rels
+    ]
 
 
 # 供测试复位（避免重复建索引覆盖既有数据）

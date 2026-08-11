@@ -4,6 +4,7 @@
 （backend/app/core/）向上查找，无论从 backend/ 还是项目根启动都能读到。
 已有环境变量优先（load_dotenv 默认不覆盖）。
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -52,7 +53,9 @@ class Settings(BaseSettings):
     collector_allow_internal: bool = False  # SSRF 防护；仅本地演示/测试时置 true
     collector_max_proxy_retries: int = 2  # W6：连接类失败自动换代理重试轮数（0=关闭）
     # W9 采集增强
-    collector_browser_profile: str = ""  # 留空=独立持久采集 profile；"default"=复用本机 Chrome 登录态
+    collector_browser_profile: str = (
+        ""  # 留空=独立持久采集 profile；"default"=复用本机 Chrome 登录态
+    )
     collector_polite_min_delay: float = 2.0  # 礼貌采集：同域最小请求间隔（秒）
 
     # ---- MCP 插件注册中心（W9）----

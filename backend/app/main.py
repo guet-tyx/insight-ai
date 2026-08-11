@@ -3,6 +3,7 @@
 启动：uv run uvicorn app.main:app --reload --port 8000
 文档：http://localhost:8000/docs（OpenAPI 自动生成）
 """
+
 from __future__ import annotations
 
 import logging
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI):
         from app.services.ingest_service import ensure_collection
 
         ensure_collection()
-    except Exception:  # noqa: BLE001 — 基础设施未就绪时应用仍可启动
+    except Exception:
         logger.warning("Milvus 集合初始化失败（容器未启动？），知识库接口将不可用", exc_info=True)
     yield
 

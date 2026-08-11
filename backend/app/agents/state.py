@@ -5,6 +5,7 @@
 不记录其中间变量（重试计数、浏览器 payload 等），仅在子图 END 后读取
 暴露字段 —— 保障状态空间清洁与隔离。
 """
+
 from __future__ import annotations
 
 import operator
@@ -42,10 +43,10 @@ class GlobalState(TypedDict):
 class CollectorState(TypedDict):
     """Collector 子图私有状态：采集任务与原始产物（不泄露到父图 checkpoint）。"""
 
-    task_requirement: str      # 从父图注入的采集任务
-    url: str                   # 待采集 URL（Supervisor 拆解产出，可空）
+    task_requirement: str  # 从父图注入的采集任务
+    url: str  # 待采集 URL（Supervisor 拆解产出，可空）
     raw_artifacts: Annotated[list[dict[str, Any]], operator.add]
-    retry_count: int           # 采集重试计数（私有）
+    retry_count: int  # 采集重试计数（私有）
     browser_payload: dict[str, Any]  # 浏览器执行细节（W6 扩展）
 
 

@@ -1,4 +1,5 @@
 """知识库相关 Pydantic Schema。"""
+
 from __future__ import annotations
 
 from datetime import datetime

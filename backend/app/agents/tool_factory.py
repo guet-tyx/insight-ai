@@ -3,6 +3,7 @@
 - MCP 优先：registry 可用时 Agent 挂载远端工具（Browser/Vector/Graph MCP）
 - 本地回退：注册中心无可用端点 → 本地 @tool（行为一致）
 """
+
 from __future__ import annotations
 
 import logging
@@ -44,10 +45,14 @@ async def get_agent_tools() -> list:
             merged = list(remote_tools) + [t for t in local if t.name not in remote_names]
             _tools_cache = merged
             _mode = "mcp"
-            logger.info("Agent 工具模式：MCP 远端 + 本地补齐（%d 工具，远端 %d/%d 服务）",
-                        len(merged), len(remote), sum(1 for s in statuses if s.ok))
+            logger.info(
+                "Agent 工具模式：MCP 远端 + 本地补齐（%d 工具，远端 %d/%d 服务）",
+                len(merged),
+                len(remote),
+                sum(1 for s in statuses if s.ok),
+            )
             return _tools_cache
-    except Exception as exc:  # noqa: BLE001 — MCP 任何故障回退本地
+    except Exception as exc:
         logger.warning("MCP 工具初始化失败（%s），回退本地工具", exc)
     _tools_cache = _local_tools()
     _mode = "local"

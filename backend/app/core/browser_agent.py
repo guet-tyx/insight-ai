@@ -12,14 +12,13 @@
 ⚠️ deepseek-v4-flash 为非视觉模型：use_vision=False 走 DOM/Accessibility Tree
    文本路线（正合计划"过滤冗余节点、降低 Token 体积"的目标）。
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import random
 from typing import Any, TypeVar
-
-
 
 from app.core.config import settings
 
@@ -57,12 +56,12 @@ _StructuredOut = TypeVar("_StructuredOut")
 class BrowserSessionManager:
     """浏览器会话单例管理器（全局唯一，复用 Chromium 实例）。"""
 
-    _instance: "BrowserSessionManager | None" = None
+    _instance: BrowserSessionManager | None = None
     _session: Any = None  # BrowserSession，惰性初始化
     _session_loop_id: int | None = None  # 创建时的 asyncio 事件循环标识
     _proxy_index: int = 0
 
-    def __new__(cls) -> "BrowserSessionManager":
+    def __new__(cls) -> BrowserSessionManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -107,7 +106,7 @@ class BrowserSessionManager:
                 from app.core.stealth_browser import ensure_stealth_browser
 
                 cdp_url = await asyncio.wait_for(ensure_stealth_browser(), timeout=30)
-            except Exception as exc:  # noqa: BLE001 — stealth 失败则自启兜底
+            except Exception as exc:
                 logger.warning("Stealth 浏览器不可用（%s），回退自启 Chromium", exc)
             if cdp_url:
                 logger.info("BrowserSession 连接 Stealth CDP 浏览器")
@@ -125,9 +124,9 @@ class BrowserSessionManager:
                         "User-Agent": random.choice(UA_POOL),
                         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
                     },
-                    wait_between_actions=0.5,                       # 拟人：动作间延迟
-                    minimum_wait_page_load_time=1.0,                # 拟人：页面加载等待
-                    wait_for_network_idle_page_load_time=2.0,       # 拟人：网络空闲判定
+                    wait_between_actions=0.5,  # 拟人：动作间延迟
+                    minimum_wait_page_load_time=1.0,  # 拟人：页面加载等待
+                    wait_for_network_idle_page_load_time=2.0,  # 拟人：网络空闲判定
                 )
             self._session_loop_id = id(loop)
             logger.info("BrowserSession 已创建")
@@ -197,8 +196,8 @@ class BrowserSessionManager:
                     browser_session=session,
                     output_model_schema=output_model,
                     judge_llm=self.build_judge_llm(),  # lite 模型做完成判定（省成本）
-                    use_vision=False,          # deepseek-v4-flash 非视觉模型
-                    max_failures=3,            # 内置步骤级重试
+                    use_vision=False,  # deepseek-v4-flash 非视觉模型
+                    max_failures=3,  # 内置步骤级重试
                     llm_timeout=120,
                     step_timeout=60,
                 )
@@ -219,7 +218,7 @@ class BrowserSessionManager:
                 last_exc = CollectorError("Agent 未产出任何结果（可能是任务无法完成）")
             except CollectorError as exc:
                 last_exc = exc
-            except Exception as exc:  # noqa: BLE001 — 浏览器/驱动异常统一重试
+            except Exception as exc:
                 last_exc = exc
                 logger.warning("采集任务第 %d 次失败：%s", attempt, exc)
 

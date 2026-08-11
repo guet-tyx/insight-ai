@@ -4,6 +4,7 @@
 - 条目规范化：title / link / published / summary / source_url
 - 解析失败或空提要抛出 ValueError（由调用方转为采集失败记录）
 """
+
 from __future__ import annotations
 
 import logging
@@ -28,7 +29,7 @@ def _normalize_time(value: Any) -> str:
             import time as _time
 
             return _time.strftime("%Y-%m-%dT%H:%M:%S", published)
-    except Exception:  # noqa: BLE001 — 时间解析失败不阻断
+    except Exception:
         pass
     return ""
 
@@ -71,10 +72,4 @@ def looks_like_rss_url(url: str) -> bool:
     """RSS 特征识别（Collector 路由用）：路径含 feed/rss/.xml 或指令词。"""
     lower = url.lower()
     path = lower.split("?")[0]
-    return (
-        path.endswith(".xml")
-        or "/feed" in path
-        or "/rss" in path
-        or path.endswith("/feed/")
-        or "atom" in path
-    )
+    return path.endswith((".xml", "/feed/")) or "/feed" in path or "/rss" in path or "atom" in path

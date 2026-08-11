@@ -10,6 +10,7 @@
 - 片段粒度融合：graph 路径段与 vector chunk 按 doc_id/文本标识归一为候选集
 - 输出按 RRF 分数降序的 Top-N 融合结果（含各路径排名信息，供溯源）
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -27,7 +28,9 @@ class RankedSource:
     rank_scores: dict[str, int] = field(default_factory=dict)  # path -> rank
 
 
-def _merge_by_identity(candidates: list[tuple[str, str, float]], path: str) -> dict[tuple[str, str], RankedSource]:
+def _merge_by_identity(
+    candidates: list[tuple[str, str, float]], path: str
+) -> dict[tuple[str, str], RankedSource]:
     """把某路径的 (doc_id, text, score) 列表按 (doc_id, text) 归一为候选。"""
     merged: dict[tuple[str, str], RankedSource] = {}
     for rank, (doc_id, text, _score) in enumerate(candidates, start=1):

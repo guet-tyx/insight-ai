@@ -8,6 +8,7 @@
 lite 模型（sensenova-6.7-flash-lite）网关侧缺 xgrammar 模块，
 guided grammar 结构化输出会 400（见环境报告 §14）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -49,7 +50,9 @@ relations: [{"source":"InsightAI","target":"LangGraph","type":"DEVELOPED"},
 
 class Entity(BaseModel):
     name: str = Field(description="实体规范名")
-    type: Literal["Company", "Technology", "Person", "Paper", "Event"] = Field(description="实体类型")
+    type: Literal["Company", "Technology", "Person", "Paper", "Event"] = Field(
+        description="实体类型"
+    )
 
 
 class Relation(BaseModel):

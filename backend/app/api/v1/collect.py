@@ -1,4 +1,5 @@
 """采集路由：POST /collect 启动自然语言采集（后台执行）+ 状态轮询。"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -12,7 +13,9 @@ router = APIRouter(prefix="/collect", tags=["collect"])
 
 
 @router.post(
-    "", response_model=CollectStartResponse, status_code=202,
+    "",
+    response_model=CollectStartResponse,
+    status_code=202,
     summary="启动采集任务（自然语言指令，后台执行）",
 )
 async def start_collect(
@@ -36,12 +39,17 @@ async def start_collect(
 
             schema_to_pydantic("CollectOutput", payload.output_schema)
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     task_id = task_store.create(payload.url)
     background_tasks.add_task(
-        collect_task, task_id, payload.url, payload.instruction,
-        payload.output_schema, payload.max_steps, payload.source,
+        collect_task,
+        task_id,
+        payload.url,
+        payload.instruction,
+        payload.output_schema,
+        payload.max_steps,
+        payload.source,
     )
     return CollectStartResponse(task_id=task_id, url=payload.url)
 

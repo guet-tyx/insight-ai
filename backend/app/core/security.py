@@ -1,7 +1,8 @@
 """安全原语：Argon2 密码哈希 + HS256 JWT 签发/校验。"""
+
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import jwt
 from pwdlib import PasswordHash
@@ -23,8 +24,8 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def create_access_token(subject: str | int) -> str:
     """签发 HS256 JWT，subject 为用户唯一标识，默认 24h 过期。"""
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
-    payload = {"sub": str(subject), "exp": expire, "iat": datetime.now(timezone.utc)}
+    expire = datetime.now(UTC) + timedelta(minutes=settings.access_token_expire_minutes)
+    payload = {"sub": str(subject), "exp": expire, "iat": datetime.now(UTC)}
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 

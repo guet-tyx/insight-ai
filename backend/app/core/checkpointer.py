@@ -7,6 +7,7 @@
 - 同步入口（线程池，如列表查询）用 `get_checkpointer_sync()`（内部自建一次 loop）
 - 任何构建失败 → MemorySaver 降级（告警日志）
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -47,8 +48,10 @@ async def ensure_checkpointer():
         _saver = saver
         _is_redis = True
         logger.info("检查点已启用 AsyncRedisSaver 持久化 (%s)", settings.redis_url)
-    except Exception as exc:  # noqa: BLE001 — 降级路径
-        logger.warning("AsyncRedisSaver 初始化失败（%s），降级为 MemorySaver（重启后会话丢失）", exc)
+    except Exception as exc:
+        logger.warning(
+            "AsyncRedisSaver 初始化失败（%s），降级为 MemorySaver（重启后会话丢失）", exc
+        )
         _saver = MemorySaver()
     return _saver
 
@@ -62,9 +65,7 @@ def get_checkpointer_sync():
         except RuntimeError:
             asyncio.run(ensure_checkpointer())
         else:
-            raise RuntimeError(
-                "检查点未初始化：异步入口必须先 await ensure_checkpointer()"
-            )
+            raise RuntimeError("检查点未初始化：异步入口必须先 await ensure_checkpointer()")
     return _saver
 
 

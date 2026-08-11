@@ -1,4 +1,5 @@
 """健康探针：容器编排 / 负载均衡存活检查用。"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter

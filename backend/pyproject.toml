@@ -34,8 +34,28 @@ dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "pytest-rerunfailures>=16.4",
+    "ruff>=0.16.2",
 ]
 
 [tool.pytest.ini_options]
 # W10 覆盖率门槛：uv run pytest --cov=app 低于 80% 时失败（CI 固化）
 cov_fail_under = "80"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+# W11：CI 引入 ruff；排除测试与脚本目录的次要规则噪音
+exclude = ["tests", "scripts", "data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "G", "RUF", "S", "PERF", "PIE", "TRY", "DTZ"]
+# B008：FastAPI 依赖注入以 Depends(...) 作默认参数是官方惯例，非缺陷
+# S110 try-except-pass：基础设施降级路径属有意为之
+# RUF001/002/003：中文注释/字符串/文档中的 Unicode 是项目常态，非"歧义字符"
+# E501：业务含长 LLM Prompt/SQL 串，统一交给 ruff format 排版
+# TRY003：业务 raise ValueError("中文信息") 无需带错误类名前缀
+# S105：jwt_secret/neo4j_password 等为开发默认值（生产经 .env 覆盖），非硬编码凭据
+# S311/S324：随机节流延迟 / 文件名 md5 哈希均非加密用途
+# TRY301：采集/降级路径内 raise 语义清晰，抽象化反而降低可读性
+ignore = ["B008", "S110", "RUF001", "RUF002", "RUF003", "E501", "TRY003",
+          "S105", "S311", "S324", "TRY301"]

@@ -5,12 +5,13 @@
 - collector 路由将按本注册表选择 fetch 路径（RSS 特征优先，tls 可采走
   curl_cffi，需 JS/登录走浏览器）
 """
+
 from __future__ import annotations
 
 import logging
 import random
-import time
 import threading
+import time
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -25,10 +26,15 @@ _lock = threading.Lock()
 class SitePolicy:
     """单站点采集策略。"""
 
-    def __init__(self, fetch: str = "auto", delay: tuple[float, float] = (_MIN_DELAY, _MAX_DELAY),
-                 need_login: bool = False, captcha: bool = False) -> None:
-        self.fetch = fetch          # auto / tls / browser
-        self.delay = delay          # 请求间隔区间（秒）
+    def __init__(
+        self,
+        fetch: str = "auto",
+        delay: tuple[float, float] = (_MIN_DELAY, _MAX_DELAY),
+        need_login: bool = False,
+        captcha: bool = False,
+    ) -> None:
+        self.fetch = fetch  # auto / tls / browser
+        self.delay = delay  # 请求间隔区间（秒）
         self.need_login = need_login
         self.captcha = captcha
 
@@ -36,19 +42,19 @@ class SitePolicy:
 # 内置国内站点策略表（域后缀 → 策略；2026 实测/调研特征归纳）
 POLICY_RULES: list[tuple[str, SitePolicy]] = [
     ("baike.baidu.com", SitePolicy(fetch="tls", delay=(2.0, 4.0))),
-    ("baidu.com",       SitePolicy(fetch="tls", delay=(3.0, 6.0))),
-    ("csdn.net",        SitePolicy(fetch="tls", delay=(2.0, 5.0))),
-    ("cnblogs.com",     SitePolicy(fetch="tls", delay=(2.0, 4.0))),
-    ("jianshu.com",     SitePolicy(fetch="tls", delay=(2.0, 4.0))),
-    ("ithome.com",      SitePolicy(fetch="tls", delay=(2.0, 4.0))),
-    ("douban.com",      SitePolicy(fetch="tls", delay=(3.0, 6.0), captcha=True)),
-    ("bilibili.com",    SitePolicy(fetch="browser", delay=(3.0, 6.0))),
-    ("zhihu.com",       SitePolicy(fetch="browser", delay=(3.0, 6.0), need_login=True, captcha=True)),
-    ("weibo.com",       SitePolicy(fetch="browser", delay=(3.0, 6.0), need_login=True, captcha=True)),
-    ("weibo.cn",        SitePolicy(fetch="browser", delay=(3.0, 6.0), need_login=True, captcha=True)),
-    ("weixin.qq.com",   SitePolicy(fetch="browser", delay=(3.0, 6.0))),
-    ("taobao.com",      SitePolicy(fetch="browser", delay=(3.0, 6.0), captcha=True)),
-    ("jd.com",          SitePolicy(fetch="browser", delay=(3.0, 6.0), captcha=True)),
+    ("baidu.com", SitePolicy(fetch="tls", delay=(3.0, 6.0))),
+    ("csdn.net", SitePolicy(fetch="tls", delay=(2.0, 5.0))),
+    ("cnblogs.com", SitePolicy(fetch="tls", delay=(2.0, 4.0))),
+    ("jianshu.com", SitePolicy(fetch="tls", delay=(2.0, 4.0))),
+    ("ithome.com", SitePolicy(fetch="tls", delay=(2.0, 4.0))),
+    ("douban.com", SitePolicy(fetch="tls", delay=(3.0, 6.0), captcha=True)),
+    ("bilibili.com", SitePolicy(fetch="browser", delay=(3.0, 6.0))),
+    ("zhihu.com", SitePolicy(fetch="browser", delay=(3.0, 6.0), need_login=True, captcha=True)),
+    ("weibo.com", SitePolicy(fetch="browser", delay=(3.0, 6.0), need_login=True, captcha=True)),
+    ("weibo.cn", SitePolicy(fetch="browser", delay=(3.0, 6.0), need_login=True, captcha=True)),
+    ("weixin.qq.com", SitePolicy(fetch="browser", delay=(3.0, 6.0))),
+    ("taobao.com", SitePolicy(fetch="browser", delay=(3.0, 6.0), captcha=True)),
+    ("jd.com", SitePolicy(fetch="browser", delay=(3.0, 6.0), captcha=True)),
 ]
 
 # 兜底策略（未命中注册表）
@@ -64,7 +70,13 @@ def policy_for(url: str) -> SitePolicy:
         if host.endswith(suffix) and len(suffix) > best_len:
             matched = policy
             best_len = len(suffix)
-    logger.info("策略匹配 %s → fetch=%s delay=%s login=%s", host, matched.fetch, matched.delay, matched.need_login)
+    logger.info(
+        "策略匹配 %s → fetch=%s delay=%s login=%s",
+        host,
+        matched.fetch,
+        matched.delay,
+        matched.need_login,
+    )
     return matched
 
 

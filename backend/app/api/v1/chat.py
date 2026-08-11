@@ -1,4 +1,5 @@
 """对话路由（W4）：会话管理 + SSE 流式 Agent 问答（替换 501 占位）。"""
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -47,7 +48,7 @@ def list_messages(
         agent = agent_service.get_agent()
         state = agent.get_state({"configurable": {"thread_id": session_id}})
         messages = (state.values or {}).get("messages", [])
-    except Exception as exc:  # noqa: BLE001 — 未知 thread 或取态失败
+    except Exception as exc:
         raise HTTPException(status_code=404, detail="会话不存在") from exc
     if not messages:
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -56,7 +57,11 @@ def list_messages(
         if getattr(msg, "type", "") in ("human", "ai") and not getattr(msg, "tool_calls", None):
             content = agent_service._extract_token_text(getattr(msg, "content", ""))
             if content.strip():
-                history.append(ChatMessageOut(role="user" if msg.type == "human" else "assistant", content=content))
+                history.append(
+                    ChatMessageOut(
+                        role="user" if msg.type == "human" else "assistant", content=content
+                    )
+                )
     return history[-20:]  # 最近 20 条
 
 

@@ -38,4 +38,7 @@ tmp/
 *.sqlite3
 
 # ===== 运行时数据（浏览器 profile/验证码归档/CA 副本）=====
-backend/data/
+backend/data/# 覆盖率/压测运行时产物
+.coverage
+.coverage.*
+htmlcov/

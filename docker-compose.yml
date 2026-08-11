@@ -1,6 +1,8 @@
-# Insight AI 基础设施编排（开发环境）
-# 覆盖：Milvus 向量库(etcd+minio)、Neo4j 图库、Redis 状态存储
-# 应用容器（backend/frontend/mcp-*）在 W11 阶段并入本文件
+# Insight AI 全栈编排（W11：基础设施 + 应用容器一体）
+# 覆盖：Milvus 向量库(etcd+minio)、Neo4j 图库、Redis 状态存储、
+#       backend(FastAPI)、frontend(Next.js)、mcp-*（4 个 FastMCP 工具服务）
+# 一键启动：docker compose up -d --build
+# 应用镜像多阶段构建（backend/Dockerfile、frontend/Dockerfile）——防镜像过大
 name: insightai
 
 services:
@@ -100,9 +102,178 @@ services:
       timeout: 5s
       retries: 5
 
+  # ---------- 应用：后端（FastAPI + LangGraph） ----------
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        # 基础镜像可经 DOCKER_BASE_PY 覆盖（国内网络走加速镜像；CI 默认官方）
+        BASE_PY: ${DOCKER_BASE_PY:-python:3.12-slim}
+    container_name: insight-backend
+    env_file: ./.env
+    environment:
+      # 容器网络内基础设施主机名（覆盖 .env 的 localhost）
+      - MILVUS_URI=http://milvus-standalone:19530
+      - NEO4J_URI=bolt://neo4j-graph:7687
+      - REDIS_URL=redis://redis-state-store:6379/0
+      # MCP 端点走容器内服务名（registry 自动追加 /mcp）
+      - MCP_SERVERS=["http://mcp-browser:8101","http://mcp-vector:8102","http://mcp-graph:8103","http://mcp-system:8104"]
+      # SQLite 数据落持久卷（避免容器重建丢库）
+      - DATABASE_URL=sqlite:////app/data/insightai.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend-data:/app/data
+    depends_on:
+      milvus-standalone:
+        condition: service_healthy
+      neo4j-graph:
+        condition: service_healthy
+      redis-state-store:
+        condition: service_healthy
+      mcp-browser:
+        condition: service_started
+      mcp-vector:
+        condition: service_started
+      mcp-graph:
+        condition: service_started
+      mcp-system:
+        condition: service_started
+
+  # ---------- 应用：前端（Next.js 14） ----------
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # 基础镜像可经 DOCKER_BASE_NODE 覆盖（国内网络走加速镜像；CI 默认官方）
+        BASE_NODE: ${DOCKER_BASE_NODE:-node:20-alpine}
+        # 浏览器端 API 地址（容器外访问宿主 8000）
+        NEXT_PUBLIC_API_BASE: http://localhost:8000/api/v1
+    container_name: insight-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+  # ---------- 应用：MCP 工具服务集群（同一镜像，不同端口） ----------
+  mcp-browser:
+    image: insightai-backend:latest  # 与 backend 共用同一镜像（不同 command/端口）
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: insight-mcp-browser
+    env_file: ./.env
+    environment:
+      - MILVUS_URI=http://milvus-standalone:19530
+      - NEO4J_URI=bolt://neo4j-graph:7687
+      - REDIS_URL=redis://redis-state-store:6379/0
+    command: ["python", "/app/mcp_servers/browser_mcp.py", "--host", "0.0.0.0", "--port", "8101"]
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://127.0.0.1:8101/mcp"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    ports:
+      - "8101:8101"
+    depends_on:
+      milvus-standalone:
+        condition: service_healthy
+      neo4j-graph:
+        condition: service_healthy
+      redis-state-store:
+        condition: service_healthy
+
+  mcp-vector:
+    image: insightai-backend:latest  # 与 backend 共用同一镜像（不同 command/端口）
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: insight-mcp-vector
+    env_file: ./.env
+    environment:
+      - MILVUS_URI=http://milvus-standalone:19530
+      - NEO4J_URI=bolt://neo4j-graph:7687
+      - REDIS_URL=redis://redis-state-store:6379/0
+    command: ["python", "/app/mcp_servers/vector_mcp.py", "--host", "0.0.0.0", "--port", "8102"]
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://127.0.0.1:8102/mcp"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    ports:
+      - "8102:8102"
+    depends_on:
+      milvus-standalone:
+        condition: service_healthy
+      neo4j-graph:
+        condition: service_healthy
+      redis-state-store:
+        condition: service_healthy
+
+  mcp-graph:
+    image: insightai-backend:latest  # 与 backend 共用同一镜像（不同 command/端口）
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: insight-mcp-graph
+    env_file: ./.env
+    environment:
+      - MILVUS_URI=http://milvus-standalone:19530
+      - NEO4J_URI=bolt://neo4j-graph:7687
+      - REDIS_URL=redis://redis-state-store:6379/0
+    command: ["python", "/app/mcp_servers/graph_mcp.py", "--host", "0.0.0.0", "--port", "8103"]
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://127.0.0.1:8103/mcp"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    ports:
+      - "8103:8103"
+    depends_on:
+      milvus-standalone:
+        condition: service_healthy
+      neo4j-graph:
+        condition: service_healthy
+      redis-state-store:
+        condition: service_healthy
+
+  mcp-system:
+    image: insightai-backend:latest  # 与 backend 共用同一镜像（不同 command/端口）
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: insight-mcp-system
+    env_file: ./.env
+    environment:
+      - MILVUS_URI=http://milvus-standalone:19530
+      - NEO4J_URI=bolt://neo4j-graph:7687
+      - REDIS_URL=redis://redis-state-store:6379/0
+    command: ["python", "/app/mcp_servers/system_mcp.py", "--host", "0.0.0.0", "--port", "8104"]
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://127.0.0.1:8104/mcp"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    ports:
+      - "8104:8104"
+    depends_on:
+      milvus-standalone:
+        condition: service_healthy
+      neo4j-graph:
+        condition: service_healthy
+      redis-state-store:
+        condition: service_healthy
+
 volumes:
   etcd-data:
   minio-data:
   milvus-data:
   neo4j-data:
   redis-data:
+  backend-data:

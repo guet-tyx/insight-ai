@@ -7,6 +7,7 @@
 命中 → 截图归档 data/captcha/ + 产物标记 {status:"captcha"} →
 采集/任务事件 captcha_required（前端 HITL 提示人工处理后可重试）。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -33,7 +34,7 @@ KEYWORD_PATTERNS = [
 ]
 # DOM 特征（滑块/验证码容器常见）
 DOM_PATTERNS = [
-    r"id=[\"']nc_1_n1z[\"']",          # 阿里滑块
+    r"id=[\"']nc_1_n1z[\"']",  # 阿里滑块
     r"class=[\"'][^\"']*slide[^\"']*[\"']",
     r"id=[\"'][^\"']*captcha[^\"']*[\"']",
     r"id=[\"'][^\"']*verify[^\"']*[\"']",
@@ -52,13 +53,13 @@ def look_like_captcha_page(url: str = "", title: str = "", html: str = "") -> bo
 async def archive_captcha(url: str, page: Any, run_id: str = "collect") -> Path:
     """命中验证码：截图归档 data/captcha/，返回归档路径。"""
     directory = stealth_manager.captcha_dir()
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now(datetime.UTC).strftime("%Y%m%d_%H%M%S")
     digest = hashlib.md5(url.encode("utf-8")).hexdigest()[:8]
     path = directory / f"{stamp}_{run_id[:8]}_{digest}.png"
     try:
         await page.screenshot(path=str(path))
         logger.warning("验证码已归档：%s（url=%s）", path, url[:80])
-    except Exception as exc:  # noqa: BLE001 — 归档失败不阻断
+    except Exception as exc:
         logger.warning("验证码截图失败：%s", exc)
     return path
 

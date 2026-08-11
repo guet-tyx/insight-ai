@@ -9,6 +9,7 @@
 4. 每个 Chunk 注入富元数据：doc_id / page_number / parent_header /
    chunk_index（created_at 由入库层填充）
 """
+
 from __future__ import annotations
 
 import io
@@ -17,10 +18,10 @@ from collections import Counter
 import pymupdf
 from pydantic import BaseModel, Field
 
-MAX_CHUNK_CHARS = 1000      # 单块字符数上限（bge-m3 8192 token 上限的余量保护）
-OVERLAP_CHARS = 100         # 硬切分时的前后重叠字符
-MAX_HEADING_CHARS = 80      # 标题文本长度上限（超长视为正文而非标题）
-HEADING_SIZE_DELTA = 1.0    # 标题字号须比正文字号大至少该值
+MAX_CHUNK_CHARS = 1000  # 单块字符数上限（bge-m3 8192 token 上限的余量保护）
+OVERLAP_CHARS = 100  # 硬切分时的前后重叠字符
+MAX_HEADING_CHARS = 80  # 标题文本长度上限（超长视为正文而非标题）
+HEADING_SIZE_DELTA = 1.0  # 标题字号须比正文字号大至少该值
 
 
 class ParsedBlock(BaseModel):
@@ -88,7 +89,9 @@ def _map_heading_sizes(blocks: list[ParsedBlock]) -> dict[float, int]:
     return {size: level for level, size in enumerate(heading_sizes[:3], start=1)}
 
 
-def _split_overflow(text: str, max_chars: int = MAX_CHUNK_CHARS, overlap: int = OVERLAP_CHARS) -> list[str]:
+def _split_overflow(
+    text: str, max_chars: int = MAX_CHUNK_CHARS, overlap: int = OVERLAP_CHARS
+) -> list[str]:
     """超长文本二次切分：优先按段落边界，单段超长则硬切并保留重叠。"""
     if len(text) <= max_chars:
         return [text]
@@ -120,10 +123,12 @@ def _split_overflow(text: str, max_chars: int = MAX_CHUNK_CHARS, overlap: int = 
     return chunks
 
 
-def _build_chunks(blocks: list[ParsedBlock], doc_id: str, heading_map: dict[float, int]) -> list[ParsedChunk]:
+def _build_chunks(
+    blocks: list[ParsedBlock], doc_id: str, heading_map: dict[float, int]
+) -> list[ParsedChunk]:
     """按标题树遍历文本块，产出语义分块。"""
     chunks: list[ParsedChunk] = []
-    header_stack: list[str] = []   # 最近一层 H1/H2/H3 标题
+    header_stack: list[str] = []  # 最近一层 H1/H2/H3 标题
     buf: list[str] = []
     buf_page = 1
 

@@ -27,6 +27,7 @@
 | GET | `/system/mcp` | ✅ W9 | MCP 注册中心诊断：各服务状态/工具清单/延迟 |
 | POST | `/system/mcp/refresh` | ✅ W9 | 热插拔刷新：新增/下线 MCP Server 无需重启主服务 |
 | GET | `/system/trace` | ✅ W10 | 本地 Trace 诊断：事件统计 / 工具失败率 / 延迟分位（P50/P95/P99）/ 幻觉信号（引用超标计数），LangSmith 有 key 时双轨 |
+| GET | `/system/trace/ui` | ✅ W11 | Trace 诊断面板：自包含 HTML（深色卡片 + JWT 轮询），首帧服务端渲染，登录态自动刷新 |
 | POST | `/agents/runs` | ✅ W5+W8 | 启动 Supervisor-Worker 多智能体任务：`{instruction}` → **202** + run_id（后台执行） |
 | POST | `/agents/runs/{id}/review` | ✅ W8 | **HITL 审核**：`{action: approve/reject/revise, comment?}` → 202；revise 必填意见；仅 awaiting_review 可审（409） |
 | GET | `/agents/runs/{id}/stream` | ✅ W5+W8 | SSE 阶段事件流：`stage`… → `review_required`（含草稿，等待审核）→ 恢复后继续 → `done`（final_report）/`error` |

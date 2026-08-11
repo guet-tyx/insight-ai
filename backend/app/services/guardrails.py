@@ -4,6 +4,7 @@
 - route_validator: 路由决策枚举校验（日志级告警，不阻断）
    纯函数，可单测。
 """
+
 from __future__ import annotations
 
 import logging

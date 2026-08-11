@@ -9,12 +9,14 @@
     {"type": "error",      "message"}
 心跳：工具执行长耗时期间每 15s 输出 SSE 注释行 ": ping"。
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
@@ -165,8 +167,8 @@ async def stream_sse(session_id: str, message: str) -> AsyncIterator[str]:
                 stream_mode=["messages", "updates"],
             ):
                 await queue.put((mode, data))
-        except Exception as exc:  # noqa: BLE001 — 异常转为 error 事件
-            logger.error("Agent 流式执行失败：%s", exc, exc_info=True)
+        except Exception as exc:
+            logger.exception("Agent 流式执行失败")
             await queue.put(("error", exc))
         finally:
             await queue.put(("close", None))
@@ -176,7 +178,7 @@ async def stream_sse(session_id: str, message: str) -> AsyncIterator[str]:
         while True:
             try:
                 mode, data = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_SECONDS)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 yield ": ping\n\n"  # SSE 注释行心跳，防中间层断流
                 continue
             if mode == "close":
@@ -203,11 +205,13 @@ async def stream_sse(session_id: str, message: str) -> AsyncIterator[str]:
                                     if key in seen_tools:
                                         continue
                                     seen_tools.add(key)
-                                    yield _sse({
-                                        "type": "tool_start",
-                                        "name": call.get("name", ""),
-                                        "args": call.get("args", {}),
-                                    })
+                                    yield _sse(
+                                        {
+                                            "type": "tool_start",
+                                            "name": call.get("name", ""),
+                                            "args": call.get("args", {}),
+                                        }
+                                    )
                     elif node_name == "tools":
                         for msg in state.get("messages", []):
                             preview = str(getattr(msg, "content", ""))[:TOOL_PREVIEW_CHARS]

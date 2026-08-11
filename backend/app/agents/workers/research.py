@@ -5,6 +5,7 @@
 W7 升级：检索走 hybrid（Milvus + Neo4j 1-2 跳路径，RRF 融合）；
 extracted_entities 产出实体清单（供 Analyst 引用图谱路径）。
 """
+
 from __future__ import annotations
 
 import logging

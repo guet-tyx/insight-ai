@@ -1,4 +1,5 @@
 """知识库路由（W2）：文档上传（后台异步入库）/ 列表 / 状态 / 向量问答。"""
+
 from __future__ import annotations
 
 from uuid import uuid4

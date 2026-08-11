@@ -1,0 +1,96 @@
+# Insight AI CI（W11）：后端 lint+test / 前端 lint+build / 镜像构建
+# 触发器：push / PR 到 main
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------- 后端：ruff lint + 单测（含覆盖率门槛 80%） ----------
+  backend:
+    name: backend (ruff + pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: 安装依赖
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: ruff lint
+        working-directory: backend
+        run: uv run ruff check app ../mcp_servers
+
+      - name: 启动基础设施（Milvus/Neo4j/Redis）
+        run: docker compose up -d --wait --wait-timeout 300 etcd minio milvus-standalone neo4j-graph redis-state-store
+
+      - name: pytest（非 flaky + 覆盖率 ≥80%）
+        working-directory: backend
+        env:
+          # CI 无 LLM key：INFRA_READY 守卫自动跳过真实 LLM/浏览器集成用例
+          HTTPS_PROXY: ""
+          HTTP_PROXY: ""
+        run: uv run pytest -q -m "not flaky" --cov=app --cov-report=term
+
+      - name: 停基础设施
+        if: always()
+        run: docker compose down -v
+
+  # ---------- 前端：lint + build（standalone） ----------
+  frontend:
+    name: frontend (pnpm lint + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: lint
+        run: pnpm lint
+
+      - name: build
+        run: pnpm build
+
+  # ---------- Docker：multi-stage 镜像构建验证 ----------
+  docker:
+    name: docker (multi-stage build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建后端 + MCP 镜像（backend/Dockerfile）
+        run: docker build -f backend/Dockerfile -t insight-backend:ci .
+
+      - name: 构建前端镜像（frontend/Dockerfile）
+        run: docker build -f frontend/Dockerfile -t insight-frontend:ci .

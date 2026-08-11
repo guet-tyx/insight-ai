@@ -6,6 +6,7 @@
 - 远端工具 → langchain BaseTool 适配（供 LangGraph Agent 直接挂载）
 - 双模式：registry 无可用端点时调用方回退本地实现
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -20,9 +21,9 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-HANDSHAKE_TIMEOUT = 5.0      # 握手超时（秒）
-MAX_RETRIES = 2              # 单端点重试次数
-TOOL_CALL_TIMEOUT = 180.0    # 远端工具调用超时（浏览器采集可达分钟级）
+HANDSHAKE_TIMEOUT = 5.0  # 握手超时（秒）
+MAX_RETRIES = 2  # 单端点重试次数
+TOOL_CALL_TIMEOUT = 180.0  # 远端工具调用超时（浏览器采集可达分钟级）
 
 
 class ServerStatus(BaseModel):
@@ -40,7 +41,7 @@ class MCPRegistry:
     """工具服务注册中心（进程内单例）。"""
 
     def __init__(self) -> None:
-        self._clients: dict[str, Any] = {}      # endpoint -> fastmcp.Client
+        self._clients: dict[str, Any] = {}  # endpoint -> fastmcp.Client
         self._tools: dict[str, list[Any]] = {}  # endpoint -> [mcp.types.Tool]
         self._status: dict[str, ServerStatus] = {}
         self._lock = asyncio.Lock()
@@ -79,12 +80,15 @@ class MCPRegistry:
                 status.latency_ms = int((time.monotonic() - start) * 1000)
                 self._clients[endpoint] = client
                 self._tools[endpoint] = tools
-                logger.info("MCP 握手成功 %s（%d 工具，%dms）", endpoint, len(tools), status.latency_ms)
-                return status
-            except Exception as exc:  # noqa: BLE001 — 单端点失败隔离
+                logger.info(
+                    "MCP 握手成功 %s（%d 工具，%dms）", endpoint, len(tools), status.latency_ms
+                )
+                return status  # noqa: TRY300 — 成功路径直接返回，失败由 except 收集
+            except Exception as exc:
                 status.error = f"{type(exc).__name__}: {exc}"[:200]
-                logger.warning("MCP 握手失败 %s（第 %d/%d 次）：%s",
-                               endpoint, attempt, MAX_RETRIES, exc)
+                logger.warning(
+                    "MCP 握手失败 %s（第 %d/%d 次）：%s", endpoint, attempt, MAX_RETRIES, exc
+                )
                 if attempt < MAX_RETRIES:
                     await asyncio.sleep(1.0)
         self._clients.pop(endpoint, None)
@@ -136,6 +140,7 @@ registry = MCPRegistry()
 
 # ---------- langchain BaseTool 适配 ----------
 
+
 def build_langchain_tools(remote_tools: list[Any]):
     """把 MCP 远端工具包装为 langchain BaseTool 列表（供 Agent 挂载）。
 
@@ -157,7 +162,8 @@ def build_langchain_tools(remote_tools: list[Any]):
             # MCP CallToolResult 归一为字符串（防御：text 字段缺失按空串处理）
             if hasattr(result, "content") and isinstance(result.content, list):
                 return "\n".join(
-                    str(getattr(c, "text", "")) for c in result.content
+                    str(getattr(c, "text", ""))
+                    for c in result.content
                     if getattr(c, "type", "") == "text"
                 )
             return str(result)
@@ -169,8 +175,12 @@ def build_langchain_tools(remote_tools: list[Any]):
         fields = {}
         for pname, pdef in props.items():
             ptype = {
-                "string": str, "integer": int, "number": float,
-                "boolean": bool, "object": dict, "array": list,
+                "string": str,
+                "integer": int,
+                "number": float,
+                "boolean": bool,
+                "object": dict,
+                "array": list,
             }.get(pdef.get("type"), Any)
             default = ... if pname in required else None
             fields[pname] = (ptype, default)

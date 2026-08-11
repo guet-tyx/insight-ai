@@ -1,4 +1,5 @@
 """用户相关的 Pydantic Schema（请求/响应模型）。"""
+
 from __future__ import annotations
 
 from datetime import datetime

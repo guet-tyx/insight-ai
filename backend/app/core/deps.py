@@ -1,4 +1,5 @@
 """公共依赖：OAuth2 方案与当前用户解析（供各路由复用）。"""
+
 from __future__ import annotations
 
 import jwt as pyjwt
@@ -27,7 +28,7 @@ def get_current_user(
     try:
         subject = decode_access_token(token)
     except pyjwt.PyJWTError:
-        raise credentials_exc
+        raise credentials_exc from None
     user = db.get(User, int(subject))
     if user is None:
         raise credentials_exc

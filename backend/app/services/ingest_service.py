@@ -4,6 +4,7 @@
 - Milvus（docker compose 启动，集合名 insight_knowledge）
 - SiliconFlow API（EMBEDDING_MODEL / SILICONFLOW_API_KEY，见 .env）
 """
+
 from __future__ import annotations
 
 import logging
@@ -113,7 +114,7 @@ def ingest_document(doc_id: str, file_bytes: bytes, filename: str) -> None:
                     "parent_header": chunk.parent_header,
                     "chunk_index": chunk.chunk_index,
                 }
-                for chunk, vec in zip(chunks, vectors)
+                for chunk, vec in zip(chunks, vectors, strict=False)
             ]
             for i in range(0, len(rows), EMBED_BATCH_SIZE):
                 mc.insert(COLLECTION, rows[i : i + EMBED_BATCH_SIZE])
@@ -122,10 +123,10 @@ def ingest_document(doc_id: str, file_bytes: bytes, filename: str) -> None:
             record.status = "ready"
             record.chunk_count = len(chunks)
             logger.info("文档 %s(%s) 入库完成：%d 个分块", filename, doc_id, len(chunks))
-        except Exception as exc:  # noqa: BLE001 — 后台任务需吞掉异常转为 failed
+        except Exception as exc:
             record.status = "failed"
             record.error = f"{type(exc).__name__}: {exc}"[:500]
-            logger.error("文档 %s 入库失败：%s", doc_id, exc, exc_info=True)
+            logger.exception("文档 %s 入库失败", doc_id)
             db.commit()
             return
 
@@ -134,7 +135,7 @@ def ingest_document(doc_id: str, file_bytes: bytes, filename: str) -> None:
             graph_count = _build_graph(chunks, doc_id)
             record.graph_count = graph_count
             logger.info("文档 %s 图谱构建完成：%d 实体", doc_id, graph_count)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             record.graph_count = 0
             logger.warning("文档 %s 图谱构建失败（不影响检索）：%s", doc_id, exc)
         db.commit()

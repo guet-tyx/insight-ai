@@ -16,6 +16,7 @@
 ⚠️ 伦理与合规：仅用于采集公开可访问信息与本人账号已登录内容，
 遵守 robots.txt 与目标站条款，低频礼貌采集。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,8 +26,6 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +68,12 @@ def _find_free_port() -> int:
 class StealthBrowserManager:
     """全局单例：持久化 context（登录态保留）+ CDP 端点供 browser_use 复用。"""
 
-    _instance: "StealthBrowserManager | None" = None
+    _instance: StealthBrowserManager | None = None
     _context: Any = None
     _cdp_url: str | None = None
     _debug_port: int | None = None
 
-    def __new__(cls) -> "StealthBrowserManager":
+    def __new__(cls) -> StealthBrowserManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -120,12 +119,11 @@ class StealthBrowserManager:
             self._context = await pw.chromium.launch_persistent_context(
                 user_data_dir=str(_DATA_DIR), **context_kwargs
             )
-        except Exception as exc:  # noqa: BLE001 — 任意启动失败重试一次
+        except Exception as exc:
             logger.warning("Stealth 浏览器启动失败（%s），重试一次", exc)
             self._debug_port = _find_free_port()
             context_kwargs["args"] = [
-                a for a in context_kwargs["args"]
-                if not a.startswith("--remote-debugging-port")
+                a for a in context_kwargs["args"] if not a.startswith("--remote-debugging-port")
             ] + [f"--remote-debugging-port={self._debug_port}"]
             self._context = await pw.chromium.launch_persistent_context(
                 user_data_dir=str(_DATA_DIR), **context_kwargs
@@ -150,7 +148,7 @@ class StealthBrowserManager:
                     resp = await client.get(f"http://127.0.0.1:{port}/json/version")
                     if resp.status_code == 200:
                         return resp.json()["webSocketDebuggerUrl"]
-            except Exception:  # noqa: BLE001 — 浏览器未就绪，等待
+            except Exception:
                 pass
             await asyncio.sleep(0.5)
         raise RuntimeError("无法读取 Chrome 调试端点（DevTools 未就绪）")
