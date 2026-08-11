@@ -19,6 +19,7 @@ def test_collect_structured_output(local_test_page: str) -> None:
         collect(
             local_test_page,
             "提取页面的标题和要点列表",
+            source="web",  # W9: auto 现优先 TLS 快路径，浏览器结构断言需显式 web
             output_schema={
                 "type": "object",
                 "properties": {
@@ -42,7 +43,7 @@ def test_collect_plain_text(local_test_page: str) -> None:
     from app.services.collector_service import collect
 
     result = asyncio.run(
-        collect(local_test_page, "回答：这个页面是什么平台？", max_steps=15, allow_internal=True)
+        collect(local_test_page, "回答：这个页面是什么平台？", source="web", max_steps=15, allow_internal=True)
     )
     if isinstance(result, dict):
         assert result.get("title") or result.get("summary"), "结构化结果为空"

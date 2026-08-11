@@ -137,31 +137,58 @@ async def collect(
     allow_internal: bool = False,
     source: str = "auto",
 ) -> Any:
-    """执行一次采集（W6 三路由）；返回结构化数据（dict/列表）或文本。
+    """执行一次采集（W6 路由 + W9 策略增强）；返回结构化数据（dict/列表）。
 
-    source：auto（RSS 特征识别）/ rss（强制 RSS 解析，不耗浏览器）/ web（强制浏览器）。
-    rss 路径默认输出 RssExtract（自定义 output_schema 仅对 web 路径生效）。
+    source：auto（RSS/策略特征识别）/ rss（强制 RSS）/ tls（强制 TLS 指纹抓取）/
+            web（强制浏览器）。
+    策略路由（auto）：RSS 特征 → RSS；反爬策略表 fetch=tls → tls_fetch；
+    fetch=browser 或 tls 失败 → 浏览器（stealth CDP）。
+    验证码命中：返回 {status:"captcha", ...} 供人工接管。
     """
     ok, err = validate_url(url, allow_internal=allow_internal)
     if not ok:
         raise CollectorError(err)
-    if source not in ("auto", "rss", "web"):
+    if source not in ("auto", "rss", "tls", "web"):
         raise CollectorError(f"未知 source: {source}")
 
-    # ---- RSS 快速路径（auto 特征命中或强制 rss）----
+    from app.core.captcha_guard import captcha_artifact, look_like_captcha_page
+    from app.services.anti_bot import policy_for
     from app.services.rss_service import fetch_rss, looks_like_rss_url
+    from app.services.tls_fetch import tls_fetch
 
+    # ---- RSS 快速路径（auto 特征命中或强制 rss）----
     if source == "rss" or (source == "auto" and looks_like_rss_url(url)):
         extract = await fetch_rss(url)
         return extract.model_dump()
 
-    # ---- Web（浏览器）路径 ----
+    # ---- 策略判定（auto）：tls 站点优先 TLS 指纹抓取 ----
+    policy = policy_for(url)
+    if source == "tls" or (source == "auto" and policy.fetch in ("tls", "auto")):
+        try:
+            result = await tls_fetch(url)
+            if result.status_code in (401, 403, 429) or result.status_code >= 500:
+                raise CollectorError(f"TLS 抓取被拦截（HTTP {result.status_code}），转浏览器")
+            if look_like_captcha_page(url=url, html=result.html):
+                return captcha_artifact(url, _captcha_record(url))
+            if result.text and len(result.text) >= 80:
+                logger.info("TLS 指纹抓取成功 url=%s len=%d", url, len(result.text))
+                return {"url": url, "text": result.text[:8000], "source_type": "tls"}
+            raise CollectorError("TLS 内容过少，转浏览器")
+        except CollectorError:
+            if source == "tls":
+                raise
+            logger.info("TLS 抓取不可用，转浏览器采集：%s", url)
+        except Exception as exc:  # noqa: BLE001 — 网络类失败转浏览器
+            logger.warning("TLS 抓取异常（%s），转浏览器", exc)
+            if source == "tls":
+                raise CollectorError(f"TLS 抓取失败：{exc}") from exc
+
+    # ---- Web（浏览器）路径（stealth CDP 指纹对抗）----
     task = build_task_instruction(url, instruction)
     output_model = None
     if output_schema:
         output_model = schema_to_pydantic("CollectOutput", output_schema)
     if output_model is None:
-        # W6：web 路径默认强类型输出（WebExtract），校验失败由引擎回退文本
         from app.schemas.collect import WebExtract
 
         output_model = WebExtract
@@ -177,8 +204,22 @@ async def collect(
         data: Any = result.model_dump() if hasattr(result, "model_dump") else result
     else:
         data = str(result)
+    # 验证码特征（结果文本层面检测，人工接管）
+    if look_like_captcha_page(url=url, title=str(data)[:500], html=str(data)[:20000]):
+        return captcha_artifact(url, _captcha_record(url))
     logger.info("采集完成 url=%s 耗时=%dms 结构=%s", url, elapsed_ms, isinstance(data, dict))
     return data
+
+
+def _captcha_record(url: str) -> str:
+    """验证码命中记录（归档占位路径；截图归档由 stealth 上下文补充）。"""
+    import hashlib
+    import time as _t
+    from pathlib import Path
+
+    digest = hashlib.md5(url.encode("utf-8")).hexdigest()[:8]
+    stamp = _t.strftime("%Y%m%d_%H%M%S")
+    return str(Path(__file__).resolve().parent.parent.parent / "data" / "captcha" / f"{stamp}_{digest}.png")
 
 
 async def collect_task(task_id: str, url: str, instruction: str,

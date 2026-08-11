@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     browser_proxy_list: str = ""  # 代理池，逗号分隔；空 = 直连（本机开发默认）
     collector_allow_internal: bool = False  # SSRF 防护；仅本地演示/测试时置 true
     collector_max_proxy_retries: int = 2  # W6：连接类失败自动换代理重试轮数（0=关闭）
+    # W9 采集增强
+    collector_browser_profile: str = ""  # 留空=独立持久采集 profile；"default"=复用本机 Chrome 登录态
+    collector_polite_min_delay: float = 2.0  # 礼貌采集：同域最小请求间隔（秒）
 
     app_name: str = "Insight AI"
     app_version: str = "0.1.0"

@@ -85,9 +85,11 @@ class BrowserSessionManager:
     def _get_session(self) -> Any:
         """获取（必要时创建）全局唯一的 BrowserSession。
 
-        反检测基线：随机 UA + 中文语言头 + 无沙箱参数 + 代理（若配置）
-        + 拟人化时序参数（W6：动作间延迟/最短加载时间/网络空闲等待）。
-        事件循环变更时自动重建：playwright 连接绑定创建时的 loop。
+        反检测基线（W9 增强）：
+        - 优先连接 **Stealth 浏览器**（stealth_browser 模块：真实指纹 + JS 注入 +
+          持久 profile 登录态），通过 CDP 复用 —— 国内站风控对抗主路径
+        - 兜底：自启 Chromium（随机 UA + 中文语言头 + 拟人时序 + 代理池轮换）
+        事件循环变更时自动重建（playwright 连接绑定创建时的 loop）。
         """
         loop = asyncio.get_running_loop()
         if self._session is not None and self._session_loop_id != id(loop):
@@ -95,24 +97,36 @@ class BrowserSessionManager:
             self._session = None
         if self._session is None:
             _, BrowserSession = _load_browser_use()
-            proxy = self._next_proxy()
-            args = ["--no-sandbox", "--disable-setuid-sandbox"]
-            if proxy:
-                args.append(f"--proxy-server={proxy}")
-            self._session = BrowserSession(
-                headless=True,
-                keep_alive=True,
-                args=args,
-                headers={
-                    "User-Agent": random.choice(UA_POOL),
-                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                },
-                wait_between_actions=0.5,                       # 拟人：动作间延迟
-                minimum_wait_page_load_time=1.0,                # 拟人：页面加载等待
-                wait_for_network_idle_page_load_time=2.0,       # 拟人：网络空闲判定
-            )
+            # W9：优先 stealth CDP（指纹对抗 + 登录态）
+            cdp_url = None
+            try:
+                from app.core.stealth_browser import ensure_stealth_browser
+
+                cdp_url = asyncio.run_coroutine_threadsafe(ensure_stealth_browser(), loop).result(30)
+            except Exception as exc:  # noqa: BLE001 — stealth 失败则自启兜底
+                logger.warning("Stealth 浏览器不可用（%s），回退自启 Chromium", exc)
+            if cdp_url:
+                logger.info("BrowserSession 连接 Stealth CDP 浏览器")
+                self._session = BrowserSession(cdp_url=cdp_url, keep_alive=True)
+            else:
+                proxy = self._next_proxy()
+                args = ["--no-sandbox", "--disable-setuid-sandbox"]
+                if proxy:
+                    args.append(f"--proxy-server={proxy}")
+                self._session = BrowserSession(
+                    headless=True,
+                    keep_alive=True,
+                    args=args,
+                    headers={
+                        "User-Agent": random.choice(UA_POOL),
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                    },
+                    wait_between_actions=0.5,                       # 拟人：动作间延迟
+                    minimum_wait_page_load_time=1.0,                # 拟人：页面加载等待
+                    wait_for_network_idle_page_load_time=2.0,       # 拟人：网络空闲判定
+                )
             self._session_loop_id = id(loop)
-            logger.info("BrowserSession 已创建 (proxy=%s)", proxy or "直连")
+            logger.info("BrowserSession 已创建")
         return self._session
 
     def build_llm(self) -> Any:

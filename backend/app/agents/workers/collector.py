@@ -46,30 +46,28 @@ collect_webpage（真实浏览器）重试**，不要放弃采集；
 
 
 async def _fetch_static_impl(url: str) -> str:
-    """静态页抓取：httpx 拉取，去标签保留正文文本。
+    """静态页抓取（升级版）：curl_cffi 模拟 Chrome TLS/HTTP2 指纹。
 
     反爬识别：403/4xx 或验证页特征 → 抛出明确信号，促使 LLM 回退浏览器。
+    同域请求经 polite_wait 节流（礼貌采集）。
     """
-    import httpx
     import re as _re
 
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True,
-                                 headers={"User-Agent": "Mozilla/5.0 InsightAI/1.0"}) as client:
-        resp = await client.get(url)
-        if resp.status_code in (401, 403, 429) or resp.status_code >= 500:
-            raise ValueError(
-                f"静态抓取被目标站点反爬拦截（HTTP {resp.status_code}），"
-                "该站点需要真实浏览器渲染/通过反爬：请改用 collect_webpage 工具"
-            )
-        resp.raise_for_status()
-        html = resp.text
+    from app.services.anti_bot import polite_wait
+    from app.services.tls_fetch import tls_fetch
+
+    polite_wait(url)
+    result = await tls_fetch(url)
+    if result.status_code in (401, 403, 429) or result.status_code >= 500:
+        raise ValueError(
+            f"静态抓取被目标站点反爬拦截（HTTP {result.status_code}），"
+            "该站点需要真实浏览器渲染/通过反爬：请改用 collect_webpage 工具"
+        )
+    html = result.html
     # 验证页特征：极短页面且含验证关键词
     if len(html) < 200 and ("验证" in html or "captcha" in html.lower() or "安全验证" in html):
         raise ValueError("命中站点安全验证页，请改用 collect_webpage 浏览器采集")
-    # 简单正文提取：去 script/style/标签，折叠空白
-    text = _re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html)
-    text = _re.sub(r"(?s)<[^>]+>", " ", text)
-    text = _re.sub(r"\s+", " ", text).strip()
+    text = result.text
     if len(text) < 50:
         raise ValueError(f"静态抓取内容过少（{len(text)} 字符），可能需要浏览器渲染")
     return text[:4000]

@@ -19,8 +19,8 @@
 | POST | `/knowledge/documents/upload` | ✅ W2 | PDF 上传 → **202** 后台解析+向量化（轮询状态），仅支持 .pdf，≤20MB |
 | GET | `/knowledge/documents/{id}` | ✅ W2 | 单文档状态（processing → ready / failed 轮询用，含 graph_count 图谱实体数） |
 | POST | `/knowledge/query` | ✅ W2+W7 | 混合检索 Top-K（Milvus 向量 + Neo4j 图谱 1-2 跳 → RRF k=60 融合）+ LLM 引证式回答；SourceHit 含 `source_type`（vector/graph） |
-| POST | `/collect` | ✅ W3+W6 | 自然语言采集：`{url, instruction, source?, output_schema?, max_steps?}` → **202** + task_id。`source`: `auto`(默认，RSS 特征自动分流)/`rss`(强制 RSS，不耗浏览器)/`web`(强制浏览器) |
-| GET | `/collect/tasks/{id}` | ✅ W3 | 采集任务轮询（running → ready（含 data）/ failed（含 error））。rss 路径 data=`RssExtract{feed_title, items[]}`；web 路径默认 `WebExtract{title, summary, key_points}` |
+| POST | `/collect` | ✅ W3+W6+W9 | 自然语言采集：`{url, instruction, source?, output_schema?, max_steps?}` → **202**。`source`: `auto`(RSS→TLS→浏览器 策略路由)/`rss`/`tls`(TLS 指纹快采)/`web`(浏览器) |
+| GET | `/collect/tasks/{id}` | ✅ W3+W9 | 任务轮询。rss 路径 data=`RssExtract`；tls 路径 `{url,text,source_type:tls}`；web 默认 `WebExtract`；**验证码命中 data.status=captcha**（人工接管提示 + 截图归档） |
 | POST | `/chat/sessions` | ✅ W4 | 创建会话 → `{session_id}`（多轮上下文 thread_id） |
 | GET | `/chat/sessions/{id}/messages` | ✅ W4 | 会话最近 20 条 user/assistant 历史（未知会话 404） |
 | POST | `/chat/sessions/{id}/messages` | ✅ W4 | 发消息 → **SSE 流式** Agent 执行事件（见下方协议） |
