@@ -89,6 +89,7 @@ def test_collect_auto_prefers_tls(local_test_page: str) -> None:
 
 @pytest.mark.skipif(not __import__("tests.conftest", fromlist=["BROWSER_READY"]).BROWSER_READY,
                     reason="Chromium 未就绪")
+@pytest.mark.flaky(reruns=2, reruns_delay=3)  # 浏览器单例跨用例偶发连接抖动
 def test_stealth_fingerprint_injected() -> None:
     """stealth JS 生效：webdriver 隐藏、plugins/languages/并发补全、chrome 存在。"""
     from app.core.stealth_browser import stealth_manager

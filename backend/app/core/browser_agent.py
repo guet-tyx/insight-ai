@@ -148,15 +148,18 @@ class BrowserSessionManager:
         )
 
     def build_judge_llm(self) -> Any:
-        """任务完成判定（二分类）等轻量辅助：lite 模型省成本。
+        """任务完成判定（browser_use judge，带结构化输出约束）。
 
-        ⚠️ 不能用 with_structured_output（lite 网关缺 xgrammar 模块）；
-        judge 为普通 chat 调用，兼容。
+        ⚠️ 必须用主模型：browser_use 的 judge 走 guided grammar 结构化输出，
+        lite 模型（sensenova-6.7-flash-lite）网关缺 xgrammar 模块 → 每次
+        判分 400（实测 Judge trace failed）。主模型 deepseek-v4-flash 正常。
         """
+        if not settings.openai_api_key:
+            raise CollectorError("LLM 未配置（OPENAI_API_KEY），无法驱动浏览器 Agent")
         from browser_use.llm.openai.chat import ChatOpenAI
 
         return ChatOpenAI(
-            model=settings.llm_model_lite,
+            model=settings.llm_model,  # 主模型（xgrammar 兼容）
             api_key=settings.openai_api_key,
             base_url=settings.llm_base_url,
             temperature=0,
