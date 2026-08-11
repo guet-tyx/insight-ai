@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     collector_browser_profile: str = ""  # 留空=独立持久采集 profile；"default"=复用本机 Chrome 登录态
     collector_polite_min_delay: float = 2.0  # 礼貌采集：同域最小请求间隔（秒）
 
+    # ---- MCP 插件注册中心（W9）----
+    mcp_servers: str = ""  # JSON 数组：["http://127.0.0.1:8101", ...]；空 = 仅本地工具
+
     app_name: str = "Insight AI"
     app_version: str = "0.1.0"
 

@@ -23,7 +23,9 @@
 | GET | `/collect/tasks/{id}` | ✅ W3+W9 | 任务轮询。rss 路径 data=`RssExtract`；tls 路径 `{url,text,source_type:tls}`；web 默认 `WebExtract`；**验证码命中 data.status=captcha**（人工接管提示 + 截图归档） |
 | POST | `/chat/sessions` | ✅ W4 | 创建会话 → `{session_id}`（多轮上下文 thread_id） |
 | GET | `/chat/sessions/{id}/messages` | ✅ W4 | 会话最近 20 条 user/assistant 历史（未知会话 404） |
-| POST | `/chat/sessions/{id}/messages` | ✅ W4 | 发消息 → **SSE 流式** Agent 执行事件（见下方协议） |
+| POST | `/chat/sessions/{id}/messages` | ✅ W4 | 发消息 → **SSE 流式** Agent 执行事件（工具经 MCP 远端优先，W9） |
+| GET | `/system/mcp` | ✅ W9 | MCP 注册中心诊断：各服务状态/工具清单/延迟 |
+| POST | `/system/mcp/refresh` | ✅ W9 | 热插拔刷新：新增/下线 MCP Server 无需重启主服务 |
 | POST | `/agents/runs` | ✅ W5+W8 | 启动 Supervisor-Worker 多智能体任务：`{instruction}` → **202** + run_id（后台执行） |
 | POST | `/agents/runs/{id}/review` | ✅ W8 | **HITL 审核**：`{action: approve/reject/revise, comment?}` → 202；revise 必填意见；仅 awaiting_review 可审（409） |
 | GET | `/agents/runs/{id}/stream` | ✅ W5+W8 | SSE 阶段事件流：`stage`… → `review_required`（含草稿，等待审核）→ 恢复后继续 → `done`（final_report）/`error` |

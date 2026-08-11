@@ -86,8 +86,12 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def build_agent():
-    """构建 ReAct 单 Agent（RedisSaver 持久化检查点，thread_id=会话 ID）。"""
+def build_agent(tools: list | None = None):
+    """构建 ReAct 单 Agent（RedisSaver 持久化检查点，thread_id=会话 ID）。
+
+    tools 为 None 时使用本地工具集（sync 场景）；异步入口先经
+    tool_factory.get_agent_tools()（MCP 优先，W9 双模式）。
+    """
     if not settings.openai_api_key:
         raise RuntimeError("LLM 未配置（OPENAI_API_KEY）")
     llm = ChatOpenAI(
@@ -98,26 +102,33 @@ def build_agent():
         max_retries=4,  # 网关侧 429 限流瞬时抖动消化
         request_timeout=120,
     )
+    if tools is None:
+        from app.agents.tool_factory import _local_tools
+
+        tools = _local_tools()
     return create_react_agent(
         llm,
-        tools=[knowledge_search, collect_webpage],
+        tools=tools,
         checkpointer=get_checkpointer_sync(),  # RedisSaver 持久化（W5），Redis 不可用降级 Memory
         prompt=SYSTEM_PROMPT,
     )
 
 
 _agent = None
+_agent_tools: list | None = None
 
 
-def get_agent():
+def get_agent(tools: list | None = None):
     """全局单例 Agent。
 
     ⚠️ 必须复用同一实例：各请求共享同一检查点（RedisSaver），
     否则多轮会话记忆完全丢失；单实例 + 持久化检查点支持重启保留。
+    tools 变化（MCP refresh）时自动重建。
     """
-    global _agent
-    if _agent is None:
-        _agent = build_agent()
+    global _agent, _agent_tools
+    if _agent is None or _agent_tools is not tools:
+        _agent = build_agent(tools)
+        _agent_tools = tools
     return _agent
 
 
@@ -128,7 +139,10 @@ async def stream_sse(session_id: str, message: str) -> AsyncIterator[str]:
     事件经 asyncio.Queue 转发；空白超时发 ": ping" 心跳。
     """
     await ensure_checkpointer()  # 先在本事件循环内构建检查点（幂等），再取图
-    agent = get_agent()
+    from app.agents.tool_factory import get_agent_tools
+
+    tools = await get_agent_tools()  # W9：MCP 优先 + 本地回退
+    agent = get_agent(tools)
     config = {"configurable": {"thread_id": session_id}}
     queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
     seen_tools: set[str] = set()  # 去重工具启动事件
@@ -189,7 +203,7 @@ async def stream_sse(session_id: str, message: str) -> AsyncIterator[str]:
                             preview = str(getattr(msg, "content", ""))[:TOOL_PREVIEW_CHARS]
                             yield _sse({"type": "tool_end", "name": "tools", "preview": preview})
         # 最终答案：检查点保存的最新 AI 消息（无工具调用的最终回答）
-        state = agent.get_state(config)
+        state = await agent.aget_state(config)  # AsyncRedisSaver：必须异步取态
         answer = ""
         for msg in reversed((state.values or {}).get("messages", [])):
             if getattr(msg, "type", "") == "ai" and not getattr(msg, "tool_calls", None):
