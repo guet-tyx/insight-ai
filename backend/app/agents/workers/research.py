@@ -41,15 +41,11 @@ def research_node(state: ResearchState) -> dict[str, Any]:
         }
         for h in hits
     ]
-    entities = [
-        {"source": h.source_type, "kind": "chunk", "count": len(chunks)}
-    ]
     graph_paths = [h for h in hits if h.source_type == "graph"]
-    if graph_paths:
-        entities = [
-            *entities,
-            {"source": "graph", "kind": "path", "count": len(graph_paths)},
-        ]
+    entities = [
+        {"source": "hybrid", "kind": "chunk", "count": len(chunks)},
+        {"source": "graph", "kind": "path", "count": len(graph_paths)},
+    ]
     logger.info("Research 混合检索命中 %d 条（图路径 %d）", len(chunks), len(graph_paths))
     return {"semantic_chunks": chunks, "extracted_entities": entities}
 

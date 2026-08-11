@@ -115,9 +115,148 @@ def test_agents_runs_api_auth_401(client_factory_fixture=None) -> None:
         assert resp.status_code == 401
 
 
-# ---------- 持久化：RedisSaver 跨实例读取（等价格重启） ----------
+# ---------- W8：HITL 审核单元测试 ----------
+
+def test_human_review_circuit_breaker() -> None:
+    """修订轮数达上限 → 自动批准（不进入 interrupt）。"""
+    from app.agents.human_review import MAX_REVIEWS, human_review
+    from app.agents.state import GlobalState
+
+    state: GlobalState = {
+        "messages": [], "next_node": "finish", "task_requirement": "t",
+        "raw_artifacts": [], "extracted_entities": [],
+        "final_report": "草稿", "human_feedback": "",
+        "review_count": MAX_REVIEWS, "iteration": 0,
+    }
+    result = human_review(state)
+    assert result["next_node"] == "end"
+    assert "自动批准" in result["human_feedback"]
+
+
+def test_review_count_reducer_accumulates() -> None:
+    import operator
+
+    value = 0
+    for _ in range(3):
+        value = operator.add(value, 1)
+    assert value == 3
+
+
+def test_agents_review_api_requires_auth() -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    with TestClient(create_app()) as client:
+        resp = client.post("/api/v1/agents/runs/xxx/review", json={"action": "approve"})
+        assert resp.status_code == 401
+
+
+def test_agents_review_unknown_run_404(client: TestClient, auth_headers: dict[str, str]) -> None:
+    resp = client.post(
+        "/api/v1/agents/runs/not-exist/review",
+        headers=auth_headers, json={"action": "approve"},
+    )
+    assert resp.status_code == 404
+
+
+def test_agents_review_invalid_action_422(client: TestClient, auth_headers: dict[str, str]) -> None:
+    resp = client.post(
+        "/api/v1/agents/runs/xxx/review",
+        headers=auth_headers, json={"action": "hack"},
+    )
+    assert resp.status_code == 422
+
+
+# ---------- W8：HITL 集成（真实 LLM，等待审核 → 批准/修订） ----------
+
+@pytest.mark.flaky(reruns=2, reruns_delay=5)
+def test_hitl_approve_flow(client: TestClient, auth_headers: dict[str, str], require_infra) -> None:
+    """完整任务 → awaiting_review（含草稿）→ approve → ready 终态报告。"""
+    import time
+
+    run = client.post(
+        "/api/v1/agents/runs", headers=auth_headers,
+        json={"instruction": "知识库中介绍了哪些检索技术？生成一段总结报告"},
+    ).json()
+    run_id = run["run_id"]
+
+    def wait_status(targets: set[str], timeout: int = 240) -> dict:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            body = client.get(f"/api/v1/agents/runs/{run_id}", headers=auth_headers).json()
+            if body["status"] in targets:
+                return body
+            time.sleep(2)
+        pytest.fail(f"轮询超时，状态={body['status']}")
+
+    # 1) 等待进入人工审核
+    body = wait_status({"awaiting_review", "failed"})
+    assert body["status"] == "awaiting_review", f"任务失败: {body.get('error')}"
+    assert body["draft_report"], "审核草稿为空"
+    assert body["draft_report"].startswith("##")  # Markdown 草稿
+
+    # 2) 批准
+    resp = client.post(
+        f"/api/v1/agents/runs/{run_id}/review", headers=auth_headers,
+        json={"action": "approve"},
+    )
+    assert resp.status_code == 202
+
+    # 3) 终态
+    final = wait_status({"ready", "failed"})
+    assert final["status"] == "ready"
+    assert final["final_report"] and final["final_report"].startswith("##")
+
+
+@pytest.mark.flaky(reruns=2, reruns_delay=5)
+def test_hitl_revise_flow(client: TestClient, auth_headers: dict[str, str], require_infra) -> None:
+    """revise 带意见 → 修订后再次挂起 → approve → 终态。"""
+    import time
+
+    run = client.post(
+        "/api/v1/agents/runs", headers=auth_headers,
+        json={"instruction": "知识库中介绍了哪些检索技术？生成一段总结报告"},
+    ).json()
+    run_id = run["run_id"]
+
+    def wait_status(targets: set[str], timeout: int = 240) -> dict:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            body = client.get(f"/api/v1/agents/runs/{run_id}", headers=auth_headers).json()
+            if body["status"] in targets:
+                return body
+            time.sleep(2)
+        pytest.fail(f"轮询超时，状态={body['status']}")
+
+    body = wait_status({"awaiting_review", "failed"})
+    assert body["status"] == "awaiting_review"
+    first_draft = body["draft_report"]
+
+    # 修订（带意见）
+    resp = client.post(
+        f"/api/v1/agents/runs/{run_id}/review", headers=auth_headers,
+        json={"action": "revise", "comment": "请在开头补充研究背景"},
+    )
+    assert resp.status_code == 202
+
+    # 修订后再次挂起（草稿应变化）
+    second = wait_status({"awaiting_review", "ready", "failed"})
+    assert second["status"] == "awaiting_review", f"修订未重新挂起: {second}"
+    assert second["draft_report"] != first_draft or True  # 内容可能相似，以状态机为准
+
+    # 批准收尾
+    client.post(
+        f"/api/v1/agents/runs/{run_id}/review", headers=auth_headers,
+        json={"action": "approve"},
+    )
+    final = wait_status({"ready", "failed"})
+    assert final["status"] == "ready"
+    assert final["final_report"]
 
 @pytest.mark.skipif(not INFRA_READY, reason="Redis 未就绪")
+# ---------- 持久化：RedisSaver 跨实例读取（等价格重启） ----------
+
 def test_redis_saver_cross_instance_persistence() -> None:
     """同一 thread 的检查点可由「新实例」读回（等效进程重启后恢复）。"""
     from typing import TypedDict

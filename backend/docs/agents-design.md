@@ -12,15 +12,13 @@
                      └──────┬──────────┬──────────┬──────────┬──────┘
               next=collector│ next=research│ next=analyst│ next=finish
                             ▼          ▼          ▼          ▼
-                     ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────┐
-                     │ Collector │ │ Research │ │ Analyst  │ │ END  │
-                     │ 子图       │ │ 子图      │ │ 子图     │ │      │
-                     │ 私有状态   │ │ 私有状态  │ │ 私有状态 │ │      │
-                     └─────┬────┘ └────┬─────┘ └────┬─────┘ └──────┘
-                           └───────────┴──────┬──────┘
-                                   ── 循环回 supervisor ──
-   W8 预留：finish 前插入 human_review 节点（interrupt() 卡点，
-   挂起状态机等人工 Command(resume) 恢复）
+                     ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐
+                     │ Collector │ │ Research │ │ Analyst  │ │  human_review│（W8）
+                     │ 子图       │ │ 子图      │ │ 子图     │ │  interrupt() │
+                     │ 私有状态   │ │ 私有状态  │ │ 私有状态  │ │  approve→END │
+                     └─────┬────┘ └────┬─────┘ └────┬─────┘ │  reject →END │
+                           └───────────┴──────┬──────┘      │  revise→analyst（≤3轮）
+                                   ── 循环回 supervisor ──   └──────────────┘
 ```
 
 ## 二、状态 Schema 与 Reducer 机制
@@ -83,9 +81,9 @@
 
 - **W6**：Collector 深化 —— RSS 路由、动态代理池、多步 ReAct（已完成）
 - **W7**：Research 深化 —— Neo4j 实体/关系抽取、Cypher 1-2 跳查询、
-  RRF 融合（已完成：research 子图检索升级为 hybrid，extracted_entities
-  产出含 graph 路径计数，Analyst 可引用图谱路径）
-- **W8**：finish 前插入 `human_review`（interrupt + Command(resume)），
-  chat 前端接入 HITL 审核界面
+  RRF 融合（已完成）
+- **W8**：HITL 已完成 —— `human_review` 节点（interrupt + Command(resume)）、
+  修订熔断 MAX_REVIEWS=3、`/agents/runs/{id}/review` API、/agents 前端审核页
+  （react-markdown 渲染 + 批准/修改意见/拒绝）
 - 检查点多 worker 部署：uvicorn 多进程时 AsyncRedisSaver 天然共享（无需
   单例 Agent 模式限制；chat 单 Agent 已在同一检查点体系内）

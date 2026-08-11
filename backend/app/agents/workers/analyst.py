@@ -50,15 +50,26 @@ def analyst_node(state: AnalystState) -> dict[str, Any]:
     for j, e in enumerate(entities, start=len(artifacts) + 1):
         material.append(f"[{j}] 研究片段：{e}")
 
+    # W8：HITL 修改意见注入（修订轮次针对性调整，不推翻重写）
+    feedback = (state.get("human_feedback") or "").strip()
+    prompt = ANALYST_PROMPT
+    if feedback:
+        prompt += (
+            "\n\n⚠️ 用户审核意见（必须在本次修订中落实）：\n"
+            f"{feedback}\n"
+            "请在保留原有结构的基础上，针对意见修改对应章节；"
+            "不要删除与意见无关的既有事实与引用。"
+        )
+
     llm = _llm()
     resp = llm.invoke(
         [
-            SystemMessage(content=ANALYST_PROMPT),
+            SystemMessage(content=prompt),
             HumanMessage(content="【素材列表】\n" + "\n".join(material) + "\n\n请生成分析报告。"),
         ]
     )
     report = str(resp.content)
-    logger.info("Analyst 报告生成：%d 字", len(report))
+    logger.info("Analyst 报告生成：%d 字（修订反馈=%s）", len(report), bool(feedback))
     return {"final_report": report}
 
 

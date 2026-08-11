@@ -29,8 +29,10 @@ class GlobalState(TypedDict):
     extracted_entities: Annotated[list[dict[str, Any]], operator.add]
     # 最终情报分析报告（Analyst 产出，Markdown）
     final_report: str
-    # 人工审核反馈指令（W8 HITL interrupt 预留）
+    # 人工审核反馈指令（W8 HITL interrupt 恢复注入）
     human_feedback: str
+    # 审核修订轮数（W8 熔断：每轮写 1，Reducer 累加）
+    review_count: Annotated[int, operator.add]
     # 循环计数：Supervisor 每轮写入 1，Reducer 累加（最大 Loop 熔断见 supervisor.py）
     iteration: Annotated[int, operator.add]
 
@@ -59,4 +61,5 @@ class AnalystState(TypedDict):
 
     raw_artifacts: list[dict[str, Any]]
     extracted_entities: list[dict[str, Any]]
+    human_feedback: str = ""  # W8：HITL 修改意见（由父图映射注入）
     final_report: str

@@ -16,6 +16,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 
+from app.agents.human_review import after_review, human_review
 from app.agents.state import GlobalState
 from app.agents.supervisor import supervise, should_continue
 from app.agents.workers.analyst import build_analyst_subgraph
@@ -29,12 +30,15 @@ _graph = None
 
 
 def _subgraph_mapper(sub_state: dict[str, Any], parent: dict[str, Any]) -> dict[str, Any]:
-    """父图 → 子图：注入全局任务指令到子图输入（按需裁剪字段）。"""
-    return {"task_requirement": (parent or {}).get("task_requirement", "")}
+    """父图 → 子图：注入全局任务指令 + HITL 修改意见（按需裁剪字段）。"""
+    return {
+        "task_requirement": (parent or {}).get("task_requirement", ""),
+        "human_feedback": (parent or {}).get("human_feedback", ""),
+    }
 
 
 def build_graph():
-    """构建主图（Supervisor + 三专家子图，共享 RedisSaver 检查点）。"""
+    """构建主图（Supervisor + 三专家子图 + HITL 审核节点，共享 RedisSaver 检查点）。"""
     collector = build_collector_subgraph()
     research = build_research_subgraph()
     analyst = build_analyst_subgraph()
@@ -44,6 +48,7 @@ def build_graph():
     workflow.add_node("collector", collector)
     workflow.add_node("research", research)
     workflow.add_node("analyst", analyst)
+    workflow.add_node("human_review", human_review)  # W8：HITL 审核卡点
 
     workflow.add_edge(START, "supervisor")
     workflow.add_conditional_edges(
@@ -53,13 +58,19 @@ def build_graph():
             "collector": "collector",
             "research": "research",
             "analyst": "analyst",
-            "finish": END,
+            "finish": "human_review",  # W8：报告完成 → 人工审核（原直达 END）
         },
     )
-    # worker 完成后回到 supervisor 决策下一轮（直至 finish / 熔断）
+    # worker 完成后回到 supervisor 决策下一轮（直至 finish）
     workflow.add_edge("collector", "supervisor")
     workflow.add_edge("research", "supervisor")
     workflow.add_edge("analyst", "supervisor")
+    # HITL：revise → analyst 针对性重写（带反馈）；approve/reject → END
+    workflow.add_conditional_edges(
+        "human_review",
+        after_review,
+        {"analyst": "analyst", "finish": END},
+    )
 
     return workflow.compile(checkpointer=get_checkpointer_sync())
 
@@ -84,6 +95,7 @@ def start_run(instruction: str, thread_id: str) -> dict:
             "extracted_entities": [],
             "final_report": "",
             "human_feedback": "",
+            "review_count": 0,
         },
         config={"configurable": {"thread_id": thread_id}},
     )

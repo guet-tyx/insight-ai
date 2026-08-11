@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -177,9 +178,14 @@ export default function ChatPage() {
             阶段一 MVP · 工具型助手
           </span>
         </div>
-        <button onClick={logout} className="text-sm text-neutral-400 hover:text-neutral-200">
-          退出登录
-        </button>
+        <div className="flex items-center gap-4">
+          <Link href="/agents" className="text-sm text-neutral-400 hover:text-neutral-200">
+            多智能体任务
+          </Link>
+          <button onClick={logout} className="text-sm text-neutral-400 hover:text-neutral-200">
+            退出登录
+          </button>
+        </div>
       </header>
 
       {/* 消息区 */}

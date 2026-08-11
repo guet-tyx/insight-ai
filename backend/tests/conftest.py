@@ -76,13 +76,19 @@ def sample_pdf_bytes() -> bytes:
 
 # ---- 基础设施探测：Milvus / 嵌入 Key / LLM Key 齐备才跑集成测试 ----
 def _milvus_up() -> bool:
-    try:
-        from app.services.ingest_service import get_milvus_client
+    """Milvus 可达性探测（2 次尝试，容忍容器健康检查过渡期波动）。"""
+    import time as _time
 
-        get_milvus_client().list_collections()
-        return True
-    except Exception:  # noqa: BLE001
-        return False
+    for attempt in range(2):
+        try:
+            from app.services.ingest_service import get_milvus_client
+
+            get_milvus_client().list_collections()
+            return True
+        except Exception:  # noqa: BLE001
+            if attempt == 0:
+                _time.sleep(2)
+    return False
 
 
 from app.core.config import settings  # noqa: E402
@@ -126,6 +132,17 @@ def _neo4j_up() -> bool:
 
 
 NEO4J_UP = _neo4j_up()
+
+
+@pytest.fixture()
+def require_infra():
+    """运行时基础设施探测（避免 pytest 双加载 conftest 导致常量时机不一致）。
+
+    依赖 Milvus / 嵌入 Key / LLM Key，缺一 skip。
+    """
+    if not (_milvus_up() and settings.siliconflow_api_key and settings.openai_api_key):
+        pytest.skip("基础设施未就绪（Milvus 或 API Key 缺失）")
+    return True
 
 
 @pytest.fixture()

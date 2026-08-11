@@ -24,9 +24,10 @@
 | POST | `/chat/sessions` | ✅ W4 | 创建会话 → `{session_id}`（多轮上下文 thread_id） |
 | GET | `/chat/sessions/{id}/messages` | ✅ W4 | 会话最近 20 条 user/assistant 历史（未知会话 404） |
 | POST | `/chat/sessions/{id}/messages` | ✅ W4 | 发消息 → **SSE 流式** Agent 执行事件（见下方协议） |
-| POST | `/agents/runs` | ✅ W5 | 启动 Supervisor-Worker 多智能体任务：`{instruction}` → **202** + run_id（后台执行） |
-| GET | `/agents/runs/{id}/stream` | ✅ W5 | SSE 阶段事件流：`stage`（supervisor 决策/collector/research/analyst）→ `done`（final_report）/`error` |
-| GET | `/agents/runs/{id}` | ✅ W5 | 任务状态（stages 明细 + final_report），运行中/完成/失败 |
+| POST | `/agents/runs` | ✅ W5+W8 | 启动 Supervisor-Worker 多智能体任务：`{instruction}` → **202** + run_id（后台执行） |
+| POST | `/agents/runs/{id}/review` | ✅ W8 | **HITL 审核**：`{action: approve/reject/revise, comment?}` → 202；revise 必填意见；仅 awaiting_review 可审（409） |
+| GET | `/agents/runs/{id}/stream` | ✅ W5+W8 | SSE 阶段事件流：`stage`… → `review_required`（含草稿，等待审核）→ 恢复后继续 → `done`（final_report）/`error` |
+| GET | `/agents/runs/{id}` | ✅ W5+W8 | 任务状态：`running → awaiting_review(含 draft_report) → ready/failed` |
 | POST | `/chat/sessions` | 🚧 W4 | 创建对话会话 |
 | POST | `/chat/sessions/{id}/messages` | 🚧 W4 | 发消息，SSE 流式返回 |
 | POST | `/agents/runs` | 🚧 W5 | 启动多智能体复合分析任务 |
