@@ -36,7 +36,17 @@ WORKER_DESCRIPTIONS = """你是 Insight AI 多智能体系统的调度中枢（S
    只有用户**明确要求采集特定网址**时才路由 collector。
 2. **未提及任何网址的任务，绝对不要路由 collector**（collector 无 URL 无法工作）。
 3. 每轮只选择一个下一步动作；子任务须具体可执行。
-4. 无法完成任务时直接 finish，不要无限循环。"""
+4. 无法完成任务时直接 finish，不要无限循环。
+
+【示例】
+用户指令：分析知识库中介绍的检索技术并生成报告
+决策：research（task="检索知识库中关于检索技术的片段"）→ analyst（task="基于片段生成报告"）→ finish
+
+用户指令：抓取 https://example.com 的新闻并总结
+决策：collector（task="采集 https://example.com 的新闻内容"）→ analyst → finish
+
+用户指令：帮我写一首诗
+决策：finish（task="素材无法满足该任务"）"""
 
 
 class RouterPlan(BaseModel):

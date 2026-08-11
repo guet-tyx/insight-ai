@@ -62,7 +62,17 @@ SYSTEM_PROMPT = """你是 Insight AI 情报分析助手（阶段一 MVP），负
 1. 优先调用 knowledge_search 检索知识库；引用结果时保留 [编号] 溯源标注。
 2. 用户明确要求采集某个网页时，调用 collect_webpage；提前告知"正在采集网页（约 20-60 秒）"。
 3. 知识库无相关内容时明确说明"知识库中未找到相关信息"，不要编造。
-4. 始终使用中文回答，简洁准确。"""
+4. 始终使用中文回答，简洁准确。
+
+【示例】
+用户：平台用了哪些检索技术？
+助手：调用 knowledge_search("检索技术") → 回答："平台采用 Milvus 密集向量检索与 Neo4j 图拓扑查询 [1][2]..."
+
+用户：帮我采集 example.com
+助手：先回复"正在采集网页…"，再调用 collect_webpage("https://example.com", ...) → 汇总结果
+
+用户：随便聊两句
+助手：直接回答，不调用任何工具。"""
 
 
 def _extract_token_text(content: Any) -> str:
@@ -173,7 +183,7 @@ async def stream_sse(session_id: str, message: str) -> AsyncIterator[str]:
                 break
             if mode == "error":
                 yield _sse({"type": "error", "message": f"Agent 执行出错：{data}"[:500]})
-                break
+                return  # 执行失败：不再取态发 done（避免空 answer 误导前端）
             if mode == "messages":
                 chunk, metadata = data
                 # create_react_agent 的模型节点名为 "agent"（非 "model"）
@@ -202,6 +212,14 @@ async def stream_sse(session_id: str, message: str) -> AsyncIterator[str]:
                         for msg in state.get("messages", []):
                             preview = str(getattr(msg, "content", ""))[:TOOL_PREVIEW_CHARS]
                             yield _sse({"type": "tool_end", "name": "tools", "preview": preview})
+                            # W10 Trace：工具调用成败与延迟信号
+                            from app.services.trace_logger import trace
+
+                            tool_name = getattr(msg, "name", "tools") or "tools"
+                            if preview.startswith(("Error", "error", "失败")):
+                                trace.tool_fail(tool_name, 0, preview[:150])
+                            else:
+                                trace.tool_ok(tool_name, 0)
         # 最终答案：检查点保存的最新 AI 消息（无工具调用的最终回答）
         state = await agent.aget_state(config)  # AsyncRedisSaver：必须异步取态
         answer = ""

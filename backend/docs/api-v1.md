@@ -26,6 +26,7 @@
 | POST | `/chat/sessions/{id}/messages` | ✅ W4 | 发消息 → **SSE 流式** Agent 执行事件（工具经 MCP 远端优先，W9） |
 | GET | `/system/mcp` | ✅ W9 | MCP 注册中心诊断：各服务状态/工具清单/延迟 |
 | POST | `/system/mcp/refresh` | ✅ W9 | 热插拔刷新：新增/下线 MCP Server 无需重启主服务 |
+| GET | `/system/trace` | ✅ W10 | 本地 Trace 诊断：事件统计 / 工具失败率 / 延迟分位（P50/P95/P99）/ 幻觉信号（引用超标计数），LangSmith 有 key 时双轨 |
 | POST | `/agents/runs` | ✅ W5+W8 | 启动 Supervisor-Worker 多智能体任务：`{instruction}` → **202** + run_id（后台执行） |
 | POST | `/agents/runs/{id}/review` | ✅ W8 | **HITL 审核**：`{action: approve/reject/revise, comment?}` → 202；revise 必填意见；仅 awaiting_review 可审（409） |
 | GET | `/agents/runs/{id}/stream` | ✅ W5+W8 | SSE 阶段事件流：`stage`… → `review_required`（含草稿，等待审核）→ 恢复后继续 → `done`（final_report）/`error` |
@@ -68,9 +69,11 @@ data: {"type": "error", "message": "错误摘要"}
 ```
 
 - 工具执行长耗时期间每 15s 输出 `: ping` 心跳注释行（防中间层断流）
+- ⚠️ 执行失败：先发 `error` 事件并**终止流（不再发 done）**（W10 修复：避免空 answer 误导前端）
 - ⚠️ deepseek-v4-flash 推理模型的 `reasoning_content` 已被后端过滤，不会出现在 token 事件
 - ⚠️ 会话记忆依赖 LangGraph 检查点（W5 起为 **AsyncRedisSaver**，跨重启保留）；
   当前后端为单进程部署，多 worker 天然共享 Redis 检查点
+- 🔎 W10：工具调用成败与延迟写入本地 Trace（`GET /system/trace` 查看失败率与分位延迟）
 
 ## agents 多智能体事件协议（W5）
 

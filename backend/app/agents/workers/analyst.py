@@ -22,9 +22,17 @@ ANALYST_PROMPT = """你是归纳分析专家（Analyst Agent）。
 基于提供的【采集素材】与【知识库检索结果】生成 Markdown 情报分析报告。
 要求：
 1. 结构完整：## 概述 / ## 关键发现 / ## 时间线（如适用）/ ## 结论
-2. 引用溯源：引用素材时在句末标注 [编号]（编号对应素材列表序号）
+2. 引用溯源：引用素材时在句末标注 [编号]（编号必须存在于素材列表，禁止编造编号）
 3. 明确区分「素材事实」与「分析推断」，禁止编造素材之外的信息
-4. 使用中文输出"""
+4. 使用中文输出
+
+【示例（片段）】
+## 概述
+本报告基于素材 [1][2] 分析平台检索技术。
+
+## 关键发现
+- 平台采用 Milvus 密集向量检索，基于 HNSW 索引与余弦相似度 [1]。
+- 分析推断：双路检索可显著提升复杂查询的召回质量。"""
 
 
 def _llm() -> ChatOpenAI:
@@ -77,6 +85,14 @@ def analyst_node(state: AnalystState) -> dict[str, Any]:
         ]
     )
     report = str(resp.content)
+    # W10 Guardrails：引用编号校验（超标 = 幻觉信号，记录 Trace）
+    from app.services.guardrails import validate_report_citations
+    from app.services.trace_logger import trace
+
+    guard = validate_report_citations(report, material_count=len(material))
+    if not guard["valid"]:
+        trace.record("guardrail", {"kind": "citation_oob", "detail": guard})
+        logger.warning("Analyst 引用校验告警：%s", guard["warnings"])
     logger.info("Analyst 报告生成：%d 字（素材 %d 采集/%d 片段/%d 实体）",
                 len(report), len(artifacts), len(chunks), len(entities))
     return {"final_report": report}

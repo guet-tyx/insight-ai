@@ -1,0 +1,73 @@
+{
+  "results": {
+    "1": {
+      "qps_target": 1,
+      "requests": 8,
+      "ok": 8,
+      "fail": 0,
+      "latency_ms": {
+        "p50": 273.6,
+        "p95": 343.1,
+        "p99": 343.1,
+        "avg": 283.7
+      },
+      "hit_avg": {
+        "vector": 0.0,
+        "graph": 0.0
+      }
+    },
+    "5": {
+      "qps_target": 5,
+      "requests": 40,
+      "ok": 40,
+      "fail": 0,
+      "latency_ms": {
+        "p50": 283.5,
+        "p95": 387.3,
+        "p99": 4331.3,
+        "avg": 398.5
+      },
+      "hit_avg": {
+        "vector": 0.0,
+        "graph": 0.0
+      }
+    },
+    "10": {
+      "qps_target": 10,
+      "requests": 80,
+      "ok": 80,
+      "fail": 0,
+      "latency_ms": {
+        "p50": 292.4,
+        "p95": 390.1,
+        "p99": 413.9,
+        "avg": 303.7
+      },
+      "hit_avg": {
+        "vector": 0.0,
+        "graph": 0.0
+      }
+    },
+    "20": {
+      "qps_target": 20,
+      "requests": 160,
+      "ok": 160,
+      "fail": 0,
+      "latency_ms": {
+        "p50": 368.0,
+        "p95": 494.3,
+        "p99": 2211.9,
+        "avg": 859.6
+      },
+      "hit_avg": {
+        "vector": 0.0,
+        "graph": 0.0
+      }
+    }
+  },
+  "profile_ms": {
+    "embed": 0.3527540000213776,
+    "milvus": 0.26682429999345914,
+    "graph": 0.006170800013933331
+  }
+}

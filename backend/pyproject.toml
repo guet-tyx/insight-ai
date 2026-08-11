@@ -32,5 +32,10 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "pytest-rerunfailures>=16.4",
 ]
+
+[tool.pytest.ini_options]
+# W10 覆盖率门槛：uv run pytest --cov=app 低于 80% 时失败（CI 固化）
+cov_fail_under = "80"

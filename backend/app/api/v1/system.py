@@ -32,3 +32,11 @@ async def mcp_refresh(_: User = Depends(get_current_user)) -> dict:
         "refreshed": True,
         "servers": [s.model_dump() for s in statuses],
     }
+
+
+@router.get("/trace")
+async def trace_summary(_: User = Depends(get_current_user)) -> dict:
+    """本地 Trace 摘要（W10）：事件统计/工具失败率/延迟分位/幻觉信号。"""
+    from app.services.trace_logger import trace
+
+    return trace.summary()

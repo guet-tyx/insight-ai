@@ -124,8 +124,7 @@ def _neo4j_up() -> bool:
     try:
         from app.services.graph_service import get_driver
 
-        with get_driver() as d:
-            d.verify_connectivity()
+        get_driver().verify_connectivity()
         return True
     except Exception:  # noqa: BLE001
         return False

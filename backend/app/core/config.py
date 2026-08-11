@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     # ---- MCP 插件注册中心（W9）----
     mcp_servers: str = ""  # JSON 数组：["http://127.0.0.1:8101", ...]；空 = 仅本地工具
 
+    # ---- 可观测性（W10 双轨：LangSmith 可选 + 本地 Trace）----
+    langchain_api_key: str = ""  # LANGCHAIN_API_KEY；为空 = 仅本地 TraceLogger
+    langchain_tracing_v2: bool = False  # 置 true + key 即启用 LangSmith 全链路
+
     app_name: str = "Insight AI"
     app_version: str = "0.1.0"
 

@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 import re
+import time
+from typing import Any
 
 from neo4j import GraphDatabase
 
@@ -19,18 +20,43 @@ logger = logging.getLogger(__name__)
 
 MAX_PATH_ROWS = 30  # 拓扑路径返回上限（防路径爆炸）
 
+# W10 压测优化：实体提取走 lite LLM（~2-17s 且易限流），同查询重复检索
+# 场景缓存提取结果（TTL 5 分钟），避免热点查询反复打 LLM。
+_EXTRACT_CACHE_TTL = 300.0
+_extract_cache: dict[str, tuple[float, list[str]]] = {}
+
+
+_driver = None  # 模块级单例：Neo4j driver 线程安全，复用连接池避免每次握手
+
 
 def get_driver():
-    return GraphDatabase.driver(
-        settings.neo4j_uri,
-        auth=(settings.neo4j_user, settings.neo4j_password),
-    )
+    """获取共享 driver（惰性创建；线程安全连接池，官方推荐单例复用）。
+
+    W10 压测发现：每请求新建 driver 含 TCP+Bolt 握手（~1s），改为复用后
+    查询链路显著下降。调用方不要 close；进程退出由 close_driver() 收尾。
+    """
+    global _driver
+    if _driver is None:
+        _driver = GraphDatabase.driver(
+            settings.neo4j_uri,
+            auth=(settings.neo4j_user, settings.neo4j_password),
+        )
+    return _driver
+
+
+def close_driver() -> None:
+    """显式关闭共享 driver（测试收尾/进程退出用）。"""
+    global _driver
+    if _driver is not None:
+        try:
+            _driver.close()
+        finally:
+            _driver = None
 
 
 def ensure_graph_schema() -> None:
     """幂等建索引（计划风险表：对常用查询路径的节点 Attribute 建立索引）。"""
-    driver = get_driver()
-    with driver.session() as s:
+    with get_driver().session() as s:
         s.run("CREATE INDEX entity_name IF NOT EXISTS FOR (n:Entity) ON (n.name)")
         s.run("CREATE INDEX entity_type IF NOT EXISTS FOR (n:Entity) ON (n.type)")
         # 实体名全文索引：支持别名/模糊匹配定位
@@ -41,7 +67,6 @@ def ensure_graph_schema() -> None:
             )
         except Exception as exc:  # noqa: BLE001 — 旧版本语法差异不阻断
             logger.warning("全文索引创建失败（不影响基础查询）：%s", exc)
-    driver.close()
 
 
 def write_triples(doc_id: str, extraction: EntityExtraction) -> tuple[int, int]:
@@ -58,44 +83,46 @@ def write_triples(doc_id: str, extraction: EntityExtraction) -> tuple[int, int]:
         r for r in extraction.relations
         if r.source in names and r.target in names and r.type in REL_TYPES
     ]
-    driver = get_driver()
-    try:
-        with driver.session() as s:
-            if extraction.entities:
-                s.run(
-                    "UNWIND $rows AS row "
-                    "MERGE (n:Entity {name: row.name}) "
-                    "SET n.type = row.type, "
-                    "n.doc_id = coalesce(n.doc_id, row.doc_id)",  # 保留首发来源
-                    rows=[
-                        {"name": e.name, "type": e.type, "doc_id": doc_id}
-                        for e in extraction.entities
-                    ],
-                )
-            if rels:
-                s.run(
-                    "UNWIND $rows AS row "
-                    "MATCH (a:Entity {name: row.source}), (b:Entity {name: row.target}) "
-                    "MERGE (a)-[r:REL {type: row.type}]->(b) "
-                    "SET r.doc_id = coalesce(r.doc_id, row.doc_id), r.evidence = row.evidence",
-                    rows=[
-                        {
-                            "source": r.source, "target": r.target,
-                            "type": r.type, "doc_id": doc_id, "evidence": r.evidence,
-                        }
-                        for r in rels
-                    ],
-                )
-        return len(extraction.entities), len(rels)
-    finally:
-        driver.close()
+    with get_driver().session() as s:
+        if extraction.entities:
+            s.run(
+                "UNWIND $rows AS row "
+                "MERGE (n:Entity {name: row.name}) "
+                "SET n.type = row.type, "
+                "n.doc_id = coalesce(n.doc_id, row.doc_id)",  # 保留首发来源
+                rows=[
+                    {"name": e.name, "type": e.type, "doc_id": doc_id}
+                    for e in extraction.entities
+                ],
+            )
+        if rels:
+            s.run(
+                "UNWIND $rows AS row "
+                "MATCH (a:Entity {name: row.source}), (b:Entity {name: row.target}) "
+                "MERGE (a)-[r:REL {type: row.type}]->(b) "
+                "SET r.doc_id = coalesce(r.doc_id, row.doc_id), r.evidence = row.evidence",
+                rows=[
+                    {
+                        "source": r.source, "target": r.target,
+                        "type": r.type, "doc_id": doc_id, "evidence": r.evidence,
+                    }
+                    for r in rels
+                ],
+            )
+    return len(extraction.entities), len(rels)
 
 
 def _extract_query_entities(query: str) -> list[str]:
     """从查询中提取核心实体名（用于图定位）；失败时返回 []。
 
-    普通 chat 输出（无结构化约束）→ 使用 lite 模型，降低主模型配额压力。
+    普通 chat 输出（无结构化约束）→ 使用 lite 模型，降低主模型配额压力；
+    结果带 TTL 缓存（同查询 5 分钟内复用，压测/热查询显著降延迟）。
     """
+    now = time.monotonic()
+    hit = _extract_cache.get(query)
+    if hit and now - hit[0] < _EXTRACT_CACHE_TTL:
+        return hit[1]
+
     from langchain_core.messages import HumanMessage, SystemMessage
     from langchain_openai import ChatOpenAI
 
@@ -120,6 +147,7 @@ def _extract_query_entities(query: str) -> list[str]:
         n.strip() for n in re.split(r"[,，、;；\n]+", str(resp.content))
         if n.strip() and n.strip() != "无"
     ]
+    _extract_cache[query] = (now, names)
     logger.info("查询实体抽取: %s", names)
     return names[:3]
 
@@ -133,27 +161,22 @@ def graph_search(query: str, max_hops: int = 2) -> list[dict[str, Any]]:
     entities = _extract_query_entities(query)
     if not entities:
         return []
-    driver = get_driver()
-    try:
-        with driver.session() as s:
-            rows = s.run(
-                f"""
-                MATCH (n:Entity)
-                WHERE n.name IN $names
-                CALL {{
-                    WITH n
-                    MATCH p = (n)-[:REL*1..{max_hops}]-(m:Entity)
-                    WHERE n <> m
-                    RETURN p AS path, [r IN relationships(p) | r.type] AS rel_types
-                    LIMIT {MAX_PATH_ROWS}
-                }}
-                RETURN path, rel_types
+    with get_driver().session() as s:
+        rows = s.run(
+            f"""
+            MATCH (n:Entity)
+            WHERE n.name IN $names
+            CALL (n) {{
+                MATCH p = (n)-[:REL*1..{max_hops}]-(m:Entity)
+                WHERE n <> m
+                RETURN p AS path, [r IN relationships(p) | r.type] AS rel_types
                 LIMIT {MAX_PATH_ROWS}
-                """,
-                names=entities,
-            ).data()
-    finally:
-        driver.close()
+            }}
+            RETURN path, rel_types
+            LIMIT {MAX_PATH_ROWS}
+            """,
+            names=entities,
+        ).data()
 
     texts = []
     for row in rows:
@@ -204,9 +227,5 @@ def _parse_path(path) -> tuple[list[dict], list[str]]:
 # 供测试复位（避免重复建索引覆盖既有数据）
 def count_graph() -> int:
     """图内节点总数（验证/测试用）。"""
-    driver = get_driver()
-    try:
-        with driver.session() as s:
-            return s.run("MATCH (n:Entity) RETURN count(n) AS c").single()["c"]
-    finally:
-        driver.close()
+    with get_driver().session() as s:
+        return s.run("MATCH (n:Entity) RETURN count(n) AS c").single()["c"]

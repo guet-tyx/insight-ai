@@ -37,7 +37,7 @@ def test_extraction_filters_self_reference() -> None:
 
 @pytest.mark.skipif(not NEO4J_UP, reason="Neo4j 未就绪")
 def test_write_and_search_triples() -> None:
-    from app.services.graph_service import count_graph, ensure_graph_schema, get_driver, write_triples
+    from app.services.graph_service import close_driver, count_graph, ensure_graph_schema, get_driver, write_triples
 
     ensure_graph_schema()
     doc = "graph-test-doc"
@@ -48,7 +48,7 @@ def test_write_and_search_triples() -> None:
             with driver.session() as s:
                 return s.run(query, **params).data()
         finally:
-            driver.close()
+            close_driver()
 
     _exec("MATCH (n:Entity {doc_id: $d}) DETACH DELETE n", d=doc)
 
@@ -82,7 +82,7 @@ def test_write_and_search_triples() -> None:
 def test_graph_search_paths(sample_pdf_bytes: bytes) -> None:
     """真实 LLM 抽取 → 写图 → graph_search 命中拓扑路径。"""
     from app.services.entity_extraction import extract_entities
-    from app.services.graph_service import ensure_graph_schema, get_driver, graph_search, write_triples
+    from app.services.graph_service import close_driver, ensure_graph_schema, get_driver, graph_search, write_triples
     from app.services.pdf_parser import parse_pdf_bytes
 
     ensure_graph_schema()
@@ -94,7 +94,7 @@ def test_graph_search_paths(sample_pdf_bytes: bytes) -> None:
             with driver.session() as s:
                 s.run(query, **params)
         finally:
-            driver.close()
+            close_driver()
 
     _exec("MATCH (n:Entity {doc_id: $d}) DETACH DELETE n", d=doc)
 

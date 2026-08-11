@@ -6,6 +6,7 @@ W7 升级：search() 内部从「纯向量」升级为「hybrid 双路 + RRF」�
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pymilvus import MilvusClient
@@ -16,6 +17,10 @@ from app.services.ingest_service import COLLECTION, ensure_collection, get_milvu
 from app.services.rrf import rrf_fuse
 
 logger = logging.getLogger(__name__)
+
+# W10 压测优化：向量召回与图谱查询互不依赖 → 并行执行（延迟=两者较大者，
+# 而非串行相加）。Neo4j driver / Milvus client / LLM 客户端均线程安全。
+_BENCH_POOL = ThreadPoolExecutor(max_workers=2)
 
 # 输出字段：召回片段 + 溯源元数据
 _OUTPUT_FIELDS = ["text", "doc_id", "page_number", "parent_header"]
@@ -74,10 +79,13 @@ def _graph_search(query: str) -> list[tuple[str, str, float]]:
 def search(query: str, top_k: int = 5) -> list[SourceHit]:
     """混合检索：向量 Top-20 + 图谱路径 → RRF(k=60) → Top-N。
 
+    向量与图谱查询并行执行（W10 压测优化：避免延迟串行相加）；
     返回 SourceHit 列表（新增 source_type 字段：vector/graph；兼容旧调用方）。
     """
-    vector_hits = _vector_search(query)
-    graph_hits = _graph_search(query)
+    vector_future = _BENCH_POOL.submit(_vector_search, query)
+    graph_future = _BENCH_POOL.submit(_graph_search, query)
+    vector_hits = vector_future.result()
+    graph_hits = graph_future.result()
     # RRF 仅消费 (doc_id, text, score)；向量页/标题元数据在融合后按 doc_id+text 回填
     fused = rrf_fuse(
         [(h[0], h[1], h[2]) for h in vector_hits],

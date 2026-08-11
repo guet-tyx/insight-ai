@@ -168,6 +168,116 @@ def test_agents_review_invalid_action_422(client: TestClient, auth_headers: dict
     assert resp.status_code == 422
 
 
+# ---------- W9/W10：run_store 状态机与阶段事件（无 LLM 纯逻辑） ----------
+
+def test_run_store_lifecycle() -> None:
+    """任务表：创建 → 阶段追加 → 待审核 → 恢复 → 终态。"""
+    from app.api.v1.agents import run_store
+
+    run_id = run_store.create()
+    body = run_store.get(run_id)
+    assert body.status == "running" and body.stages == []
+
+    run_store.append_stage(run_id, {"type": "stage", "stage": "supervisor"})
+    run_store.set_awaiting_review(run_id, "## 草稿")
+    body = run_store.get(run_id)
+    assert body.status == "awaiting_review"
+    assert body.draft_report == "## 草稿"
+
+    run_store.mark_running(run_id)
+    assert run_store.get(run_id).status == "running"
+    assert run_store.get(run_id).draft_report is None
+
+    run_store.finish(run_id, "ready", report="## 终稿")
+    body = run_store.get(run_id)
+    assert body.status == "ready" and body.final_report == "## 终稿"
+    assert run_store.get("ghost") is None
+
+
+def test_run_store_finish_with_error() -> None:
+    from app.api.v1.agents import run_store
+
+    run_id = run_store.create()
+    run_store.finish(run_id, "failed", error="CollectorError: 超时")
+    body = run_store.get(run_id)
+    assert body.status == "failed"
+    assert "超时" in body.error
+
+
+def test_push_stage_events_branches() -> None:
+    """_push_stage_events：各节点 updates → 阶段事件；__interrupt__ → True。"""
+    from app.api.v1.agents import _push_stage_events, run_store
+
+    run_id = run_store.create()
+    assert _push_stage_events(run_id, "not-a-dict") is False
+    assert _push_stage_events(run_id, {"supervisor": {"next_node": "collector"}}) is False
+    assert _push_stage_events(run_id, {"collector": {"raw_artifacts": [{"data": 1}]}}) is False
+    assert _push_stage_events(
+        run_id, {"collector": {"raw_artifacts": [{"error": "无 URL"}]}}
+    ) is False
+    assert _push_stage_events(
+        run_id, {"research": {"semantic_chunks": [{"text": "x"}, {"text": "y"}]}}
+    ) is False
+    assert _push_stage_events(
+        run_id, {"analyst": {"final_report": "## 报告内容"}}
+    ) is False
+    # HITL 挂起：updates 含 __interrupt__ → 返回 True（_execute_run 转为待审核）
+    assert _push_stage_events(run_id, {"__interrupt__": ["x"]}) is True
+
+    stages = [s["stage"] for s in run_store.get(run_id).stages]
+    assert stages == ["supervisor", "collector", "collector", "research", "analyst"]
+    de = run_store.get(run_id).stages[2]
+    assert "无 URL" in de["detail"]
+
+
+def test_push_stage_events_unknown_key_ignored() -> None:
+    """未知节点 key（无非匹配字段）→ 不产阶段事件。"""
+    from app.api.v1.agents import _push_stage_events, run_store
+
+    run_id = run_store.create()
+    assert _push_stage_events(run_id, {"weird_node": {"x": 1}}) is False
+    assert run_store.get(run_id).stages == []
+
+
+# ---------- 审核接口边界（无 LLM） ----------
+
+def test_review_not_awaiting_409(client: TestClient, auth_headers: dict[str, str]) -> None:
+    """非 awaiting_review 状态不可审核 → 409。"""
+    from app.api.v1.agents import run_store
+
+    run_id = run_store.create()  # 刚创建 = running
+    resp = client.post(
+        f"/api/v1/agents/runs/{run_id}/review",
+        headers=auth_headers, json={"action": "approve"},
+    )
+    assert resp.status_code == 409
+    assert "不可审核" in resp.json()["detail"]
+
+
+def test_review_revise_without_comment_422(client: TestClient, auth_headers: dict[str, str]) -> None:
+    """revise 必须携带意见 → 422（先置为可审核状态，绕开 409 检查）。"""
+    from app.api.v1.agents import run_store
+
+    run_id = run_store.create()
+    run_store.set_awaiting_review(run_id, "## 草稿")
+    resp = client.post(
+        f"/api/v1/agents/runs/{run_id}/review",
+        headers=auth_headers, json={"action": "revise", "comment": "   "},
+    )
+    assert resp.status_code == 422
+    assert "comment" in resp.json()["detail"]
+
+
+def test_run_status_unknown_404(client: TestClient, auth_headers: dict[str, str]) -> None:
+    resp = client.get("/api/v1/agents/runs/ghost", headers=auth_headers)
+    assert resp.status_code == 404
+
+
+def test_run_stream_unknown_404(client: TestClient, auth_headers: dict[str, str]) -> None:
+    resp = client.get("/api/v1/agents/runs/ghost/stream", headers=auth_headers)
+    assert resp.status_code == 404
+
+
 # ---------- W8：HITL 集成（真实 LLM，等待审核 → 批准/修订） ----------
 
 @pytest.mark.flaky(reruns=2, reruns_delay=5)

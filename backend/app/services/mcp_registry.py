@@ -52,7 +52,7 @@ class MCPRegistry:
         raw = settings.mcp_servers or "[]"
         try:
             parsed = json.loads(raw)
-            return [str(e).rstrip("/") for e in parsed if str(e).strip()]
+            return [str(e).strip().rstrip("/") for e in parsed if str(e).strip()]
         except json.JSONDecodeError:
             logger.warning("MCP_SERVERS 配置非合法 JSON：%s", raw[:80])
             return []
@@ -154,10 +154,10 @@ def build_langchain_tools(remote_tools: list[Any]):
         async def _run(_n: str = name, **kwargs: Any) -> Any:
             # langchain 按参数名以 kwargs 调用；远端按 dict 转发
             result = await registry.call(_n, kwargs)
-            # MCP CallToolResult 归一为字符串
+            # MCP CallToolResult 归一为字符串（防御：text 字段缺失按空串处理）
             if hasattr(result, "content") and isinstance(result.content, list):
                 return "\n".join(
-                    str(c.text) for c in result.content
+                    str(getattr(c, "text", "")) for c in result.content
                     if getattr(c, "type", "") == "text"
                 )
             return str(result)

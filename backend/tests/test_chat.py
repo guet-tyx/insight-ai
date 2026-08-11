@@ -51,6 +51,35 @@ def test_messages_unknown_session_404(client: TestClient, auth_headers: dict[str
     assert resp.status_code == 404
 
 
+def test_send_message_503_without_llm_key(
+    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """未配置 LLM Key → 503（明确提示而非空流）。"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    resp = client.post(
+        "/api/v1/chat/sessions/x/messages",
+        headers=auth_headers, json={"message": "hi"},
+    )
+    assert resp.status_code == 503
+    assert "LLM" in resp.json()["detail"]
+
+
+def test_list_messages_getstate_failure_404(
+    client: TestClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """取态异常/未知会话 → 404（异常被明确转换为 404）。"""
+    import app.services.agent_service as svc
+
+    def _boom():
+        raise RuntimeError("unknown thread")
+
+    monkeypatch.setattr(svc, "get_agent", _boom)
+    resp = client.get("/api/v1/chat/sessions/ghost/messages", headers=auth_headers)
+    assert resp.status_code == 404
+
+
 @pytest.mark.skipif(not INFRA_READY, reason="LLM Key 未就绪")
 @pytest.mark.flaky(reruns=2, reruns_delay=5)  # 真实 LLM：网关 429 限流瞬态自动重试
 def test_end_to_end_stream_with_knowledge_tool(

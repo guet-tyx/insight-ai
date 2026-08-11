@@ -82,7 +82,7 @@ class BrowserSessionManager:
         self._proxy_index += 1
         return proxy
 
-    def _get_session(self) -> Any:
+    async def _get_session(self) -> Any:
         """获取（必要时创建）全局唯一的 BrowserSession。
 
         反检测基线（W9 增强）：
@@ -90,6 +90,10 @@ class BrowserSessionManager:
           持久 profile 登录态），通过 CDP 复用 —— 国内站风控对抗主路径
         - 兜底：自启 Chromium（随机 UA + 中文语言头 + 拟人时序 + 代理池轮换）
         事件循环变更时自动重建（playwright 连接绑定创建时的 loop）。
+
+        ⚠️ 必须为 async：stealth 协程须在当前 loop 内 await（旧实现用
+        run_coroutine_threadsafe(...).result(30) 同步阻塞 loop，提交给同一
+        loop 的协程永不被调度 → 每次构建会话白等 30s 超时）。
         """
         loop = asyncio.get_running_loop()
         if self._session is not None and self._session_loop_id != id(loop):
@@ -102,7 +106,7 @@ class BrowserSessionManager:
             try:
                 from app.core.stealth_browser import ensure_stealth_browser
 
-                cdp_url = asyncio.run_coroutine_threadsafe(ensure_stealth_browser(), loop).result(30)
+                cdp_url = await asyncio.wait_for(ensure_stealth_browser(), timeout=30)
             except Exception as exc:  # noqa: BLE001 — stealth 失败则自启兜底
                 logger.warning("Stealth 浏览器不可用（%s），回退自启 Chromium", exc)
             if cdp_url:
@@ -185,7 +189,7 @@ class BrowserSessionManager:
         proxy_retries = 0
 
         for attempt in range(1, max_attempts + 1):
-            session = self._get_session()
+            session = await self._get_session()
             try:
                 agent = Agent(
                     task=task_instruction,

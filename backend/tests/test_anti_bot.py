@@ -85,6 +85,52 @@ def test_collect_auto_prefers_tls(local_test_page: str) -> None:
     assert "Insight AI" in result.get("text", "")
 
 
+# ---------- 礼貌采集：每秒节流 ----------
+
+def test_polite_wait_short_interval_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """同一域请求间隔小于策略下界 → 补齐等待（if 分支）。"""
+    import time as _time
+
+    from app.services import anti_bot
+
+    slept: list[float] = []
+    monkeypatch.setattr(anti_bot.random, "uniform", lambda a, b: b)  # 取区间上限
+    monkeypatch.setattr(_time, "sleep", lambda s: slept.append(s))
+    host = "example.com"
+    anti_bot._last_request[host] = _time.monotonic() - 0.5  # 刚刚请求过
+    anti_bot.polite_wait(f"https://{host}/x")
+    assert slept and slept[-1] > 0          # 补齐等待
+    assert slept[-1] <= 10.0                # 钳制上限
+
+
+def test_polite_wait_elapsed_enough_small_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """间隔已满足 → 短延迟（else 分支）。"""
+    import time as _time
+
+    from app.services import anti_bot
+
+    slept: list[float] = []
+    monkeypatch.setattr(anti_bot.random, "uniform", lambda a, b: (a + b) / 2)
+    monkeypatch.setattr(_time, "sleep", lambda s: slept.append(s))
+    host = "example.org"
+    anti_bot._last_request[host] = _time.monotonic() - 60.0  # 60 秒前已请求
+    anti_bot.polite_wait(f"https://{host}/x")
+    assert slept and 0.3 <= slept[-1] <= 1.0
+
+
+def test_polite_wait_unknown_host_default_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未注册域 → 默认策略（fetch=auto），不抛异常。"""
+    from unittest.mock import patch
+
+    from app.services.anti_bot import polite_wait
+
+    with patch("app.services.anti_bot.random.uniform", return_value=0.0), \
+            patch("time.sleep") as sleeper:
+        polite_wait("https://unknown-domain-xyz.com/page")
+    # sleep_for=0.0 → 不 sleep（节流已满足），仅要求不抛异常
+    assert sleeper.call_count == 0
+
+
 # ---------- Stealth 指纹注入（需 Chromium） ----------
 
 @pytest.mark.skipif(not __import__("tests.conftest", fromlist=["BROWSER_READY"]).BROWSER_READY,

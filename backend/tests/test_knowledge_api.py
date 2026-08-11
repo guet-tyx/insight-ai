@@ -94,7 +94,7 @@ def test_query_empty_knowledge_base(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
     """空知识库时给出明确提示而非报错（用例内先清空共享集合与图谱，保证确定性）。"""
-    from app.services.graph_service import get_driver
+    from app.services.graph_service import close_driver, get_driver
     from app.services.ingest_service import COLLECTION, get_milvus_client
 
     mc = get_milvus_client()
@@ -106,7 +106,7 @@ def test_query_empty_knowledge_base(
         with driver.session() as s:
             s.run("MATCH (n:Entity) DETACH DELETE n")
     finally:
-        driver.close()
+        close_driver()
 
     q = client.post(
         "/api/v1/knowledge/query",
